@@ -16,6 +16,7 @@
 ## P2 exact API contract
 | Call-center endpoint | Caller | Result |
 | --- | --- | --- |
+| POST /api/admin/workers/activate | Approved Call Desk admin | activate/revoke an existing DAVID member (worker_id remains stable) |
 | POST /api/worker/david-link/create | Approved worker with valid Google Supabase Bearer JWT | new 12-char one-time code, worker_id, organization_id, role, expiry (12 min) |
 | GET /api/worker/david-link/status | Approved worker with valid Google Supabase Bearer JWT | worker_id, active, DAVID linked flag |
 | POST /api/integrations/david/redeem | DAVID **backend** using bridge service Authorization | atomic consume of code; worker_id, organization_id, role, active, external_user_id |
@@ -47,6 +48,8 @@ A: legal recording & independently authorized AI stream; B: no recording, separa
 - Authenticated users can call issue RPC, but anonymous cannot; redeem & verify RPC can execute only for service_role.
 - SQL rollback test PASS: issue, first redeem, reject replay, verify active, admin revoke, verify inactive.
 - SQL rollback test PASS: rapid re-issue limited, wrong code rejected, expired code rejected.
+- SQL rollback test PASS: unknown user denied code issuance (42501).
+- Eight new source files were syntactically parsed, but this is not a browser/runtime test.
 - No fake worker accounts or permanent test links created.
 
 ## Security audit notes
