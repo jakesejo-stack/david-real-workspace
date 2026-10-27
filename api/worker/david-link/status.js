@@ -8,6 +8,11 @@ export default async function handler(req,res) {
       .select('worker_id,organization_id,active').eq('user_id',ctx.user.id).maybeSingle();
     if(error)return response(res,503,{error:'worker_lookup_unavailable'});
     if(!identity?.active)return response(res,403,{error:'not_approved'});
+    const {data:member,error:memberError}=await ctx.db.from('david_members')
+      .select('role').eq('user_id',ctx.user.id).maybeSingle();
+    if(memberError||!['worker','admin'].includes(member?.role)) {
+      return response(res,403,{error:'membership_revoked'});
+    }
     const {data:links,error:linkError}=await ctx.db.from('david_worker_links')
       .select('linked_at,last_verified_at,revoked_at,provider')
       .eq('worker_id',identity.worker_id).is('revoked_at',null).limit(1);
