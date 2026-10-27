@@ -58,6 +58,7 @@ Supabase security advisor reports default-deny tables with RLS but no policies (
 ## BLOCKED / not GREEN
 - Original production Vite application files, existing API handlers and secrets are not yet fully recovered into Git. `recovery/compiled-frontend` is a partial snapshot only.
 - No P2 endpoints or button are live at existing Vercel domain.
+- Revoking a DAVID link via the new worker identity blocks linked DAVID OS access, but existing legacy Call Desk CRM/RPC permissions still rely on `david_members.role`. They must be updated and regression-tested to check `david_worker_identities.active` before claiming Call Desk-wide access revocation. Do not mark P2 revocation end-to-end GREEN yet.
 - New secrets are not configured, and the DAVID backend's matching redeem flow is not available for verification.
 - Only one admin exists and zero real workers: 2-worker and cross-tenant integration tests cannot honestly be declared passed.
 - No full browser/Android/desktop smoke test or preview/production READY deployment.
