@@ -102,6 +102,10 @@ async function refresh(){
    const assign=el('select');assign.setAttribute('aria-label','Назначи оператор');
    assign.append(new Option('Без оператор',''));
    approvedWorkers.forEach(w=>assign.append(new Option(workerNames.get(w.user_id)||w.display_name||w.user_id,w.user_id)));
+   if(c.assigned_to && !approvedWorkers.some(w=>w.user_id===c.assigned_to)){
+     const current=membership.get(c.assigned_to);
+     assign.append(new Option('Текущо назначение: '+(current?.display_name||'неактивен/друг администратор'),c.assigned_to));
+   }
    assign.value=c.assigned_to||'';
    const assignBtn=el('button','Запази назначението','secondary');assignBtn.type='button';
    assignBtn.addEventListener('click',async()=>{
@@ -154,7 +158,7 @@ $('inviteform').addEventListener('submit',async e=>{
  if(!error){f.reset();await refresh()}
 });
 $('refresh').addEventListener('click',refresh);
-$('google').addEventListener('click',async()=>{const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/admin.html',queryParams:{prompt:'select_account'}}});if(error)setStatus(error.message)});
+$('google').addEventListener('click',async()=>{const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});if(error)setStatus(error.message)});
 $('signout').addEventListener('click',async()=>{await db.auth.signOut();await load()});
 await load();
 </script></body></html>
