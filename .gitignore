@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vercel/
+.env
+.env.*
+!.env.example
+*.log
+*.webm
+*.mp3
+*.wav
+*.db
+*.pem
+*.key
+*.p12
+.DS_Store
