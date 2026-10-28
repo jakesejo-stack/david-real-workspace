@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>DAVID · Admin Command Center</title>
+<style>
+:root{color-scheme:light;--bg:#f2f5fa;--card:#fff;--ink:#0d2948;--muted:#6e8299;--line:#e1e9f2;--blue:#1268eb;--green:#008b83;--nav:#0b1b32;font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--bg)}
+a{color:inherit;text-decoration:none}button,input,select{font:inherit}button{cursor:pointer}
+.shell{display:grid;grid-template-columns:255px minmax(0,1fr);min-height:100vh}
+aside{background:linear-gradient(160deg,#0e2a4b,#091627 85%);color:#eef5ff;min-height:100vh;padding:27px 18px;display:flex;flex-direction:column;gap:24px}
+.brand{font-size:28px;font-weight:900;letter-spacing:-1px}.brand span{color:#52a0ff}.brand small{display:block;font-size:9px;letter-spacing:3px;color:#91adce;font-weight:700;margin-top:-4px}
+.nav-title{color:#6f92b8;font-size:10px;text-transform:uppercase;letter-spacing:1.8px;font-weight:800;margin:14px 12px 9px}
+.nav{display:grid;gap:4px}
+.nav button{display:flex;align-items:center;gap:12px;padding:12px 13px;width:100%;border:1px solid transparent;border-radius:10px;background:transparent;color:#bdd0e8;text-align:left;font-size:14px}
+.nav button:hover,.nav button.active{background:#1e4169;border-color:#32567e;color:#fff}
+.nav .sym{font-size:17px;min-width:22px}
+.nav .count{margin-left:auto;background:#255781;padding:1px 8px;border-radius:12px;font-size:11px}
+.nav-bottom{margin-top:auto;font-size:12px;color:#91a5bf}
+.nav-bottom a{display:block;padding:7px 12px}.nav-bottom a:hover{color:white}
+.main{min-width:0}.topbar{height:72px;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 30px;background:white;border-bottom:1px solid var(--line)}
+.topbar .path{color:#8291a2;font-size:13px}.topbar .path strong{color:#133b68}
+.user-area{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.chip{font-size:11px;padding:7px 11px;border-radius:20px;background:#edf5ff;color:#315884;font-weight:750;white-space:nowrap}
+.chip.good{color:#04786d;background:#dbf7ed}.chip.warn{color:#ad6c0f;background:#fff2d9}
+.btn{border:0;border-radius:9px;background:var(--blue);color:white;padding:10px 16px;font-weight:800;font-size:13px;min-height:42px}
+.btn.secondary{border:1px solid #d8e4f0;background:#f8fbff;color:#28517a}
+.btn:disabled{opacity:.5;cursor:wait}.content{padding:29px 30px 60px;max-width:1500px;margin:auto}
+.heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin:0 0 24px}
+.eyebrow{text-transform:uppercase;letter-spacing:2px;font-size:10px;color:#5584b6;font-weight:850}
+h1{font-size:clamp(25px,3vw,35px);margin:3px 0 4px;letter-spacing:-1px}h2{font-size:18px;margin:0 0 13px;letter-spacing:-.4px}
+.sub{color:var(--muted);font-size:13px;margin:0}
+.stack{display:grid;gap:19px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.metric,.panel{background:var(--card);border:1px solid var(--line);box-shadow:0 3px 20px #1f4c7210;border-radius:15px}
+.metric{padding:20px;min-width:0}.metric .label{font-size:12px;color:var(--muted);font-weight:650;display:flex;align-items:center;justify-content:space-between}
+.metric .number{font-size:clamp(26px,3vw,36px);font-weight:850;letter-spacing:-1px;margin:8px 0 3px;font-variant-numeric:tabular-nums}
+.metric .foot{color:#7190ab;font-size:11px}
+.metric .badge{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#eff5ff;color:#2470ce;font-size:17px}
+.panel{padding:21px;min-width:0}
+.columns{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(250px,1fr);gap:17px}
+.actions{display:flex;gap:9px;flex-wrap:wrap}.tag{padding:3px 9px;background:#eaf3fe;color:#2962a3;font-size:11px;border-radius:20px;display:inline-block;font-weight:700}
+.tag.green{background:#dff6ee;color:#00836e}.tag.amber{background:#fff1d8;color:#a86a10}
+.table-wrap{overflow:auto;width:100%;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;white-space:nowrap;text-align:left;font-size:13px}
+th{background:#f5f8fc;color:#6b8199;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.7px}
+td,th{padding:12px 14px;border-bottom:1px solid #eaf0f6}tr:last-child td{border-bottom:0}td{color:#294562}
+.empty{padding:30px 18px;background:#f8fafe;border:1px dashed #c7d6e5;border-radius:10px;text-align:center;color:#8394a6;font-size:13px}
+.activity{display:grid;gap:0}.event{display:flex;gap:11px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}.event:last-child{border:0}
+.bullet{width:9px;height:9px;flex:none;border-radius:50%;background:#87b6fa;margin-top:6px}
+.event strong{font-size:12px}.event small{display:block;color:#91a3b6;font-size:11px}
+.chart{height:190px;display:flex;align-items:end;gap:8px;padding:15px 0 0;border-bottom:1px solid #dce6ef;overflow:hidden}
+.chart-group{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0;gap:5px}
+.bar-stack{height:150px;display:flex;align-items:end;justify-content:center;gap:3px}
+.bar{width:32%;max-width:22px;background:#2675ee;border-radius:5px 5px 0 0;min-height:0}.bar.manual{background:#37b5af}
+.bar-label{text-align:center;font-size:10px;color:#91a4b8}
+.legend{display:flex;gap:17px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:12px}.legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;background:#2675ee;margin-right:6px}.legend span.manual:before{background:#37b5af}
+.notice{padding:15px 17px;border:1px solid #fee2b3;background:#fffbf2;border-radius:10px;color:#8a632d;font-size:13px}
+.section{display:none}.section.visible{display:grid}
+#access{margin-top:12vh;max-width:560px;margin-left:auto;margin-right:auto;padding:28px}
+#access[hidden],#workspace[hidden],.section:not(.visible){display:none!important}
+#status{font-size:12px;color:#6685a8}
+@media(max-width:1050px){.metrics{grid-template-columns:repeat(2,1fr)}.columns{grid-template-columns:1fr}}
+@media(max-width:720px){.shell{display:block}aside{min-height:auto;gap:7px;padding:14px}.brand{font-size:24px}.nav-title,.nav-bottom{display:none}.nav{display:flex;overflow-x:auto;padding-bottom:4px}.nav button{width:auto;white-space:nowrap;font-size:12px;padding:9px}.nav .count{display:none}.topbar{height:auto;min-height:60px;padding:12px 15px}.path{display:none}.content{padding:18px 13px 40px}.metrics{gap:9px}.metric{padding:14px}.metric .number{font-size:26px}.panel{padding:15px}}
+</style></head><body>
+<div id="access" class="panel" hidden><div class="eyebrow">SOULFLAME / PRIVATE CONTROL</div><h1>DAVID Admin</h1>
+<p class="sub" id="access-message">Проверка на Google администратор…</p>
+<div class="actions" style="margin-top:20px"><button id="google" class="btn">Вход с Google</button><a href="/" class="btn secondary">Операторски портал</a></div>
+<p class="sub" style="margin-top:19px">Само боркиновият и Митко администраторски Google акаунт. Worker профилите нямат достъп до данните.</p></div>
+<div id="workspace" class="shell" hidden>
+<aside>
+<div class="brand">◇ DAVID<span>.</span><small>SOULFLAME · COMMAND CENTER</small></div>
+<div><div class="nav-title">WORKSPACE</div><nav class="nav" id="navigation">
+<button class="active" data-section="overview"><span class="sym">▦</span> Обзор</button>
+<button data-section="analytics"><span class="sym">◫</span> Аналитика</button>
+<button data-section="calls"><span class="sym">☎</span> Обаждания <span class="count" id="count-calls">0</span></button>
+<button data-section="workers"><span class="sym">♙</span> Оператори</button>
+<button data-section="companies"><span class="sym">▤</span> Фирми</button>
+<button data-section="manual"><span class="sym">✓</span> CRM резултати</button>
+<button data-section="tickets"><span class="sym">◇</span> Тикети</button>
+<button data-section="tasks"><span class="sym">▣</span> Задачи</button>
+<button data-section="audit"><span class="sym">◷</span> Активност</button>
+</nav></div>
+<div class="nav-bottom"><a href="/admin.html">⚙ Управление на оператори</a><a href="https://david-real-workspace.vercel.app/" target="_blank" rel="noopener">↗ Оригинален DAVID</a><a href="/">← Операторски вход</a></div>
+</aside>
+<div class="main">
+<header class="topbar">
+<div class="path">SOULFLAME / DAVID / <strong id="breadcrumb">Обзор</strong></div>
+<div class="user-area"><span class="chip good">● DB CONNECTED</span><span class="chip warn">☎ TWILIO НЕ Е НАСТРОЕН</span><span class="chip" id="useremail">ADMIN</span><button class="btn secondary" id="refresh" type="button">↻ Обнови</button><button class="btn secondary" id="logout" type="button">Изход</button></div>
+</header>
+<div class="content">
+<div class="heading"><div><div class="eyebrow">CONTROL ROOM / REAL-TIME SOURCE</div><h1 id="page-title">Admin Overview</h1><p class="sub">Реални записи от DAVID Supabase. Не симулираме обаждания или активности.</p></div>
+<div><span class="tag green">Само 2 Google ADMIN</span><div class="sub" style="margin-top:8px" id="updated">Последно обновяване: …</div></div></div>
+<div id="status" role="status" aria-live="polite"></div>
+<div class="section visible stack" id="section-overview">
+<div class="metrics" id="metrics"></div>
+<div class="columns">
+<section class="panel"><div class="actions" style="justify-content:space-between"><h2>Активност през последните 14 дни</h2><span class="tag">Call Desk + ръчни контакти</span></div><div id="chart" class="chart"></div><div class="legend"><span>Twilio обаждания</span><span class="manual">Ръчни контакти</span></div></section>
+<section class="panel"><h2>Контрол и сигурност</h2><div id="guardrails"></div><div class="actions" style="margin-top:14px"><a href="/admin.html" class="btn">Управлявай оператори</a></div></section>
+</div>
+<div class="columns">
+<section class="panel"><h2>Последни събития</h2><div id="recent-activity" class="activity"></div></section>
+<section class="panel"><h2>Оператори и натоварване</h2><div id="team-summary"></div></section>
+</div></div>
+<section class="section stack" id="section-analytics"><div class="metrics" id="analytics-metrics"></div><div class="panel"><h2>История по дни, последни 14 дни</h2><div id="analysis-chart" class="chart"></div><div class="legend"><span>Twilio обаждания</span><span class="manual">Ръчни контакти</span></div></div><div class="panel"><h2>Контактни резултати</h2><div id="outcome-summary"></div></div></section>
+<section class="section stack" id="section-calls"><div class="panel"><h2>Регистър на обажданията</h2><p class="sub">Продължителност, дата/час и статус. Слушане на записи не се предлага без реално наличен разрешен запис.</p><div id="calls-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-workers"><div class="panel"><div class="actions" style="justify-content:space-between"><h2>Екип и права</h2><a class="btn" href="/admin.html">Покани / Одобри / Блокирай</a></div><div id="workers-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-companies"><div class="panel"><div class="actions" style="justify-content:space-between"><h2>CRM фирми</h2><a class="btn" href="/admin.html">Назначи фирми</a></div><div id="companies-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-manual"><div class="panel"><h2>Реални ръчни контакти</h2><p class="sub">Отделени от Twilio, без измислени CallSid.</p><div id="manual-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-tickets"><div class="panel"><h2>Вътрешни DPP Support Tickets</h2><div id="tickets-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-tasks"><div class="panel"><h2>Общи задачи на SoulFlame</h2><div id="tasks-table" style="margin-top:16px"></div></div></section>
+<section class="section stack" id="section-audit"><div class="panel"><h2>Административен журнал</h2><p class="sub">Последните 60 регистрирани събития без секретни детайли.</p><div id="audit-table" style="margin-top:16px"></div></div></section>
+</div></div></div>
+<script type="module">
+import {createClient} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/+esm';
+const db=createClient('https://lyyqfpbrgjsxdqukwurl.supabase.co',"sb_publishable_vmL558NJwhKaYbnDzvQ0rA_EXl_c9K_",{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const allowed=new Set(['borquitokonsejo@gmail.com','soulflame.mitko@gmail.com']);
+const $=id=>document.getElementById(id), state={snapshot:null,section:'overview'};
+const names={overview:'Обзор',analytics:'Аналитика',calls:'Обаждания',workers:'Оператори',companies:'Фирми',manual:'CRM резултати',tickets:'Тикети',tasks:'Задачи',audit:'Активност'};
+function E(tag,text,cls){const x=document.createElement(tag);if(text!==undefined&&text!==null)x.textContent=String(text);if(cls)x.className=cls;return x}
+function empty(msg){return E('div',msg||'Няма действителни записи.','empty')}
+const n=value=>Number(value||0).toLocaleString('bg-BG');
+const time=t=>t?new Date(t).toLocaleString('bg-BG',{timeZone:'Europe/Sofia'}):'—';
+function renderTable(id,headers,rows){const root=$(id);root.replaceChildren();if(!rows.length){root.append(empty('Няма действителни записи за тази секция.'));return}
+ const outer=E('div',null,'table-wrap'),table=E('table'),head=E('thead'),tr=E('tr');
+ headers.forEach(h=>tr.append(E('th',h)));head.append(tr);table.append(head);
+ const body=E('tbody');rows.forEach(cells=>{const tr=E('tr');cells.forEach(value=>tr.append(E('td',value)));body.append(tr)});
+ table.append(body);outer.append(table);root.append(outer);
+}
+function stat(label,value,foot,icon){const el=E('article',null,'metric'),l=E('div',null,'label'),b=E('span',null);b.textContent=label;l.append(b,E('span',icon,'badge'));
+ el.append(l,E('div',n(value),'number'),E('div',foot,'foot'));return el}
+function metricFill(id,arr){const root=$(id);root.replaceChildren();arr.forEach(x=>root.append(stat(...x)))}
+function chartFill(id,series){const root=$(id);root.replaceChildren();const max=Math.max(1,...series.map(d=>Number(d.calls||0)+Number(d.manual||0)));
+ const total=series.reduce((s,d)=>s+Number(d.calls||0)+Number(d.manual||0),0);
+ if(!total){root.replaceWith(root);root.append(empty('Няма записани обаждания или ръчни контакти за периода.'));root.style.height='auto';return}
+ root.style.height='190px';
+ series.forEach(day=>{const g=E('div',null,'chart-group'),bar=E('div',null,'bar-stack');
+   const ca=E('div',null,'bar');ca.style.height=((Number(day.calls)||0)/max*140)+'px';ca.title=n(day.calls)+' обаждания';
+   const ma=E('div',null,'bar manual');ma.style.height=((Number(day.manual)||0)/max*140)+'px';ma.title=n(day.manual)+' ръчни контакта';
+   bar.append(ca,ma);g.append(bar,E('div',String(day.date||'').slice(5),'bar-label'));root.append(g);
+ });
+}
+function getName(d,x){return d?.get(String(x||''))||'—'}
+function render(){const a=state.snapshot;if(!a?.ok)return;const s=a.stats||{};
+ $('updated').textContent='Обновено: '+time(a.generated_at);
+ $('count-calls').textContent=n(s.calls);
+ metricFill('metrics',[
+ ['Всички обаждания',s.calls,'От действителния Twilio регистър','☎'],
+ ['Активни оператори',s.active_workers,'Верифицирани служители','♙'],
+ ['CRM фирми',s.companies,'Одобрени за контакт: '+n(s.calling_approved),'▦'],
+ ['Ръчни контакти',s.manual_contacts,'Има интерес: '+n(s.interested),'✓'],
+ ['Незавършени задачи',s.pending_tasks,'Общо задачи: '+n(s.admin_tasks),'▣'],
+ ['Активни тикети',s.open_tickets,'Всички тикети: '+n(s.tickets),'◇'],
+ ['Записи на разговори',s.recordings,'Реално регистрирани','◉'],
+ ['Назначени фирми',s.assigned_companies,'Do not call: '+n(s.do_not_call),'↳']
+ ]);
+ chartFill('chart',a.daily||[]);chartFill('analysis-chart',a.daily||[]);
+ const controls=$('guardrails');controls.replaceChildren();
+ controls.append(E('div','● '+n(s.admins)+' активни администратори','event'),E('div','● '+n(s.calling_approved)+' фирми с разрешен контакт','event'),E('div','● '+n(s.recordings)+' записа на разговори','event'));
+ if(!s.calling_approved)controls.append(E('div','Набирането е блокирано, докато фирмите нямат проверен номер и одобрение.','notice'));
+ const activity=$('recent-activity');activity.replaceChildren();
+ (a.audit||[]).slice(0,6).forEach(x=>{const row=E('div',null,'event');row.append(E('span',null,'bullet'));const detail=E('div');
+ detail.append(E('strong',x.action),E('small',String(x.actor||'system')+' · '+time(x.at)));row.append(detail);activity.append(row)});
+ if(!(a.audit||[]).length)activity.append(empty('Няма регистрирана активност.'));
+ const team=$('team-summary');team.replaceChildren();
+ (a.workers||[]).forEach(w=>{const row=E('div',null,'event');row.append(E('span',null,'bullet'));
+ const desc=E('div');desc.append(E('strong',w.name||w.email),E('small',w.role.toUpperCase()+' · '+(w.active?'Активен':'Неактивен')+' · '+n(w.assigned)+' фирми · '+n(w.calls)+' calls'));row.append(desc);team.append(row)});
+ const companyNames=new Map((a.companies||[]).map(c=>[String(c.id),c.company_name]));
+ const workers=new Map((a.workers||[]).map(w=>[String(w.user_id),w.email]));
+ const roletext=w=>w.role==='admin'?'ADMIN':'WORKER';
+ renderTable('workers-table',['Акаунт','Роля','Статус','Фирми','Обаждания','Ръчни'],(a.workers||[]).map(w=>[w.email,roletext(w),w.active?'Активен':'Неактивен',n(w.assigned),n(w.calls),n(w.manual)]));
+ renderTable('companies-table',['Фирма','Държава','Сектор','Отговорник','Одобрение'],(a.companies||[]).map(c=>[c.company_name,c.country||'—',c.sector||'—',getName(workers,c.assigned_to),c.do_not_call?'DO NOT CALL':c.calling_approved?'Одобрен контакт':'Неодобрен контакт']));
+ renderTable('calls-table',['Дата и час','Фирма','Оператор','Посока','Статус','Продължителност'],(a.calls||[]).map(c=>[time(c.started_at),getName(companyNames,c.company_id),getName(workers,c.worker_id),c.direction||'—',c.call_status||'—',n(c.duration_seconds)+' сек.']));
+ renderTable('manual-table',['Дата и час','Фирма','Оператор','Резултат','Канал','Следващ контакт'],(a.manual||[]).map(c=>[time(c.created_at),getName(companyNames,c.company_id),getName(workers,c.worker_user_id),c.outcome,c.channel||'—',time(c.followup_at)]));
+ renderTable('tickets-table',['Номер','Фирма','Тема','Статус','Приоритет','Създаден'],(a.tickets||[]).map(t=>[String(t.id).slice(0,8),getName(companyNames,t.company_id),t.title,t.status||'—',t.severity||'—',time(t.created_at)]));
+ renderTable('tasks-table',['Задача','Статус','Приоритет','Отговорник','Срок'],(a.tasks||[]).map(t=>[t.title,t.status,t.priority,getName(workers,t.assigned_to),time(t.due_at)]));
+ renderTable('audit-table',['Дата/час','Действие','Извършил','Фирма'],(a.audit||[]).map(t=>[time(t.at),t.action,t.actor,getName(companyNames,t.company_id)]));
+ metricFill('analytics-metrics',[
+ ['Завършени обаждания',s.completed_calls,'Продължителност '+n(s.call_seconds)+' сек.','☎'],
+ ['Ръчни контакти',s.manual_contacts,'Потвърдени резултати','✓'],
+ ['Интерес',s.interested,'Записани реални интереси','↗'],
+ ['Обратни обаждания',s.callbacks,'Заявен следващ контакт','◷']
+ ]);
+ const summary=$('outcome-summary');summary.replaceChildren();
+ [['Общо контактни опити',s.manual_contacts],['Има интерес',s.interested],['Обратно обаждане',s.callbacks]].forEach(([label,value])=>{
+  const row=E('div',null,'event');row.append(E('strong',label),E('span',n(value),'tag'));row.style.justifyContent='space-between';summary.append(row)
+ });
+}
+function navigate(section){if(!names[section])section='overview';state.section=section;
+ document.querySelectorAll('[data-section]').forEach(btn=>btn.classList.toggle('active',btn.dataset.section===section));
+ document.querySelectorAll('.section').forEach(sec=>sec.classList.toggle('visible',sec.id==='section-'+section));
+ $('breadcrumb').textContent=names[section];$('page-title').textContent=section==='overview'?'Admin Overview':names[section];
+ if(location.hash.slice(1)!==section)history.replaceState(null,'','#'+section);
+}
+async function load(){const btn=$('refresh');btn.disabled=true;$('status').textContent='Зареждане на реалните статистики…';
+ const {data,error}=await db.rpc('david_admin_dashboard_snapshot');
+ btn.disabled=false;
+ if(error||!data?.ok){$('status').textContent='Грешка в защитения отчет: '+(error?.message||'Отказан достъп');return}
+ state.snapshot=data;render();$('status').textContent='';
+}
+async function init(){const {data:auth,error}=await db.auth.getUser(),u=auth?.user;
+ if(error||!u||!allowed.has(String(u.email||'').toLowerCase())){
+   $('access').hidden=false;$('workspace').hidden=true;
+   $('access-message').textContent=u?'Отказан достъп. Този Google профил няма ADMIN права.':'Влез с единия от двата одобрени администраторски Google акаунта.';
+   return;
+ }
+ // Only a successful server-authorized RPC grants access to data.
+ const {data,error:deny}=await db.rpc('david_admin_dashboard_snapshot');
+ if(deny||!data?.ok){$('access').hidden=false;$('workspace').hidden=true;$('access-message').textContent='Нямаш активни администраторски права в Supabase.';return}
+ $('access').hidden=true;$('workspace').hidden=false;$('useremail').textContent=u.email+' · ADMIN';
+ state.snapshot=data;render();navigate(location.hash.slice(1)||'overview');
+}
+document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.section)));
+$('refresh').addEventListener('click',load);
+$('logout').addEventListener('click',async()=>{await db.auth.signOut();location.reload()});
+$('google').addEventListener('click',async()=>{const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});if(error)$('access-message').textContent=error.message});
+await init();
+// Refresh real metrics once per minute while the admin is actively viewing the dashboard.
+setInterval(async()=>{
+  if(!document.hidden && !$('workspace').hidden) await load();
+},60000);
+</script></body></html>
