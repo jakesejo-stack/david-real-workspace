@@ -213,4 +213,8 @@ $('refresh').addEventListener('click',load);
 $('logout').addEventListener('click',async()=>{await db.auth.signOut();location.reload()});
 $('google').addEventListener('click',async()=>{const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});if(error)$('access-message').textContent=error.message});
 await init();
+// Refresh real metrics once per minute while the admin is actively viewing the dashboard.
+setInterval(async()=>{
+  if(!document.hidden && !$('workspace').hidden) await load();
+},60000);
 </script></body></html>
