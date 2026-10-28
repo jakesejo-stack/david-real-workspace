@@ -36,7 +36,7 @@ a{color:#e7b96b}.footer{margin-top:32px;color:#8e8782;font-size:12px}
 <h2>Вход за DPP оператор</h2>
 <p>Въведи кода, издаден в Call Desk, след като влезеш с одобрения Google акаунт.</p>
 <div id="signedout">
-<button id="google" type="button">Вход с Google</button>
+<button id="google" type="button">Избери Google акаунт</button>
 <p class="note">Регистрацията не дава автоматично права. Администраторът трябва да е активирал оператора. Няма режим Guest за CRM.</p>
 </div>
 <div id="signedin" hidden>
@@ -75,7 +75,7 @@ async function displayState(){
   if(!currentUser){show('activation',false);show('desk',false);return}
   el('username').textContent=currentUser.email || 'Google акаунт';
   const {data:snapshot,error:snapError}=await db.rpc('david_operator_portal_snapshot');
-  if(snapError){msg('Неуспешна проверка: '+snapError.message,true);show('desk',false);show('activation',true);return}
+  if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);return}
   if(snapshot?.active){
     show('activation',false);show('desk',true);
     el('role').textContent=snapshot.role==='admin'?'ADMIN':'ОПЕРАТОР';
@@ -95,14 +95,17 @@ async function displayState(){
     }
     msg('Служебната сесия е активна. Данните са ограничени до назначените фирми.');
   }else{
-    show('activation',true);show('desk',false);
-    if(snapshot?.reason==='not_approved')msg('Този Google профил няма активна одобрена роля. Свържи се с администратора.',true);
-    else msg('Влез с еднократен код от Call Desk.');
+    const approved=snapshot?.reason==='code_required';
+    show('activation',approved);show('desk',false);
+    if(snapshot?.reason==='not_approved')
+      msg('Влязъл си като '+(currentUser.email||'непознат акаунт')+', но този профил НЕ е одобрен за DPP. Натисни „Изход от Google“, после „Избери Google акаунт“ и влез с одобрения профил от Call Desk.',true);
+    else if(approved)msg('Акаунтът е одобрен. Генерирай НОВ код от Call Desk със същия Google профил и го въведи тук.');
+    else msg('Достъпът още не е разрешен. Свържи се с администратора.',true);
   }
 }
 el('google').addEventListener('click',async ()=>{
   buttonBusy(el('google'),true);
-  const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/'}});
+  const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});
   if(error){msg('Google вход: '+error.message,true);buttonBusy(el('google'),false)}
 });
 el('codeform').addEventListener('submit',async e=>{
@@ -113,7 +116,7 @@ el('codeform').addEventListener('submit',async e=>{
   const {data,error}=await db.rpc('david_operator_portal_activate',{p_code:code});
   el('code').value='';
   buttonBusy(el('activate'),false);
-  if(error){msg('Неуспешна активация: '+error.message,true);return}
+  if(error){msg(error.message.includes('Approved active DPP member required')?'Този Google акаунт няма активни DPP права. Излез и избери одобрен акаунт, с който е генериран кодът.':'Неуспешна активация: '+error.message,true);return}
   if(!data?.ok){msg(data?.reason==='rate_limited'?'Прекалено много опити. Опитай по-късно.':'Невалиден, изтекъл, използван или чужд код.',true);return}
   await displayState();
 });
