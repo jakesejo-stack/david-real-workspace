@@ -62,9 +62,10 @@ export function validCode(code) {
   return typeof code==='string' && /^#[A-HJ-NP-Z2-9]{12}!$/.test(code.trim().toUpperCase());
 }
 export function codeDigest(code) {
-  const pepper=needed('DAVID_LINK_CODE_PEPPER');
-  if (pepper.length<32) throw Error('DAVID_LINK_CODE_PEPPER is too short');
-  return createHash('sha256').update(pepper).update(':').update(code.trim().toUpperCase()).digest('hex');
+  // Only high-entropy, 12-char cryptographically generated codes are accepted.
+  // SQL david_generate_link_code stores exactly SHA-256(code), with no logging.
+  if (!validCode(code)) throw Error('Invalid DAVID code format');
+  return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
 }
 export function validExternalId(id) {
   return typeof id==='string' && /^[a-zA-Z0-9:._-]{1,256}$/.test(id);
