@@ -101,13 +101,21 @@ function davidWorkerLinkPage(){
   if(g.view!=="profile")return;
   refresh.disabled=true;
   try{
-   const info=await hu("/api/worker/david-link/status");
+   // Direct Supabase RLS read: independent from unavailable Vercel bridge secrets.
+   const {data:ident,error:identityError}=await g.db.from("david_worker_identities")
+     .select("worker_id,organization_id,active").eq("user_id",g.user.id).maybeSingle();
+   if(identityError)throw identityError;
+   if(!ident?.active)throw Error("Служебният акаунт не е активен в Admin → Workers.");
+   const {data:linkRows,error:linksError}=await g.db.from("david_worker_links")
+     .select("worker_id").eq("worker_id",ident.worker_id).is("revoked_at",null).limit(1);
+   if(linksError)throw linksError;
+   const info={...ident,david_linked:!!linkRows?.length,integration_ready:true,david_bridge_ready:false};
    if(g.view!=="profile")return;
    N("davidProfileWorker").textContent=info.worker_id||"Неизвестен";
    N("davidProfileOrg").textContent=info.organization_id||"Неизвестна";
    if(info.david_linked){hideCode();status.textContent="✅ DAVID DPP: синхронизиран с личния Worker ID";gen.disabled=true}
    else{
-    status.textContent=info.integration_ready?"Одобрен оператор. Генерирай кода и го въведи в DAVID DPP.":"Одобрен оператор, но DAVID bridge още не е настроен със сървърни ключове. Код не може да се издаде.";
+    status.textContent="✅ Gmail профилът е активен. Можеш да издадеш личен код. DAVID OS синхронизацията още изисква свързване от Митко.";
     gen.disabled=!info.integration_ready;
    }
   }catch(err){if(g.view==="profile"){status.textContent="Служебен профил: "+(err?.message||"Недостъпен");gen.disabled=true}}
@@ -116,11 +124,13 @@ function davidWorkerLinkPage(){
  gen.onclick=async()=>{
   gen.disabled=true;hideCode();
   try{
-   const info=await hu("/api/worker/david-link/create",{method:"POST"});
+   const {data:info,error:issueError}=await g.db.rpc("david_generate_link_code");
+   if(issueError)throw issueError;
+   if(!info?.code||!info.expires_at)throw Error("Не е издаден код. Опитай отново.");
    activeCode=info.code;codeExpiresAt=Date.parse(info.expires_at)||0;
    const element=N("davidProfileCode");element.textContent=activeCode;element.style.display="block";
    copy.disabled=false;
-   status.textContent="Въведи този код в DAVID → DPP до "+new Date(info.expires_at).toLocaleTimeString("bg-BG")+".";
+   status.textContent="Кодът е издаден до "+new Date(info.expires_at).toLocaleTimeString("bg-BG")+". За синхронизация DAVID OS трябва да има работеща проверка на кода. Засега свързването не е потвърдено.";
    gen.disabled=false;
    const mintedCode=activeCode;
    setTimeout(()=>{if(g.view==="profile"&&activeCode===mintedCode&&codeExpiresAt<=Date.now()){hideCode();status.textContent="Кодът изтече. Генерирай нов."}},Math.max(0,codeExpiresAt-Date.now())+1000);
