@@ -50,7 +50,8 @@ begin
     or not exists (
       select 1 from public.david_members m join auth.users u on u.id=m.user_id
       where m.user_id=v_user and m.role='worker' and u.email_confirmed_at is not null
-        and u.raw_app_meta_data->>'provider'='google'
+        and exists (select 1 from auth.identities gi
+          where gi.user_id=u.id and gi.provider='google')
     ) then
     raise exception 'Approved Google worker required' using errcode='42501';
   end if;
