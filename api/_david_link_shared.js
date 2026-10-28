@@ -54,10 +54,12 @@ const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export function newLinkCode() {
   let code='';
   for(let i=0;i<12;i++) code+=alphabet[randomInt(alphabet.length)];
-  return code;
+  return '#'+code+'!';
 }
 export function validCode(code) {
-  return typeof code==='string' && /^[A-HJ-NP-Z2-9]{12}$/.test(code.trim().toUpperCase());
+  // Example format #1948a! is illustrative, never a shared production credential.
+  // Use twelve cryptographically random alphabet chars between the delimiters.
+  return typeof code==='string' && /^#[A-HJ-NP-Z2-9]{12}!$/.test(code.trim().toUpperCase());
 }
 export function codeDigest(code) {
   const pepper=needed('DAVID_LINK_CODE_PEPPER');
