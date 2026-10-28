@@ -1,0 +1,98 @@
+{
+  "purpose": "P0 inventory of the original full Vercel deployment; this is metadata NOT restored original source",
+  "production_domain": "david-real-workspace.vercel.app",
+  "original_deployment_id": "dpl_CgUV2jvbw7iCJkCXHCe63LVEWCAd",
+  "latest_verified_production_deployment_id": "dpl_3VpXEitM7So2zAMJDsALai7gjFJ7",
+  "vercel_project_id": "prj_wJOAuRlfScMMDDabk8PmzpbpznWW",
+  "file_count": 22,
+  "source_file_refs": [
+    {
+      "path": ".gitignore",
+      "uid": "1dae6af1433073ceb58f69a3ade051bd0ddf8e1b"
+    },
+    {
+      "path": "api/_lib.js",
+      "uid": "d8089f889dd4b00406c5cbcf0b673dca7804c389"
+    },
+    {
+      "path": "api/admin-recording.js",
+      "uid": "b3908bfe0006b6a1fb4ba5fd5c35ddadf086c116"
+    },
+    {
+      "path": "api/budget.js",
+      "uid": "5b280d4710088d03e85a4e53874cbee113e7681d"
+    },
+    {
+      "path": "api/call-progress.js",
+      "uid": "cad10ab65fa348302e47a5f4d128ac0343f23ab6"
+    },
+    {
+      "path": "api/config.js",
+      "uid": "b20489a34f1ad9870ffb97733dd0f982c00229ca"
+    },
+    {
+      "path": "api/recording.js",
+      "uid": "f689d1958899ad38ccfe49d47c29103551b7aa26"
+    },
+    {
+      "path": "api/status.js",
+      "uid": "2ab1779e7197ebf2a38c21d4329e73426cc1ef2b"
+    },
+    {
+      "path": "api/token.js",
+      "uid": "b2e701b112a7a2458a5187304b94cd84cd89d51f"
+    },
+    {
+      "path": "api/voice.js",
+      "uid": "aa76ae9c7f7cb04e89195773eeefb9ee152aef1f"
+    },
+    {
+      "path": "index.html",
+      "uid": "15acbe4b844aabae59833fea55e0043f825c7b89"
+    },
+    {
+      "path": "package.json",
+      "uid": "07ce04b0156459bb900b30fc7453c89ad64e064f"
+    },
+    {
+      "path": "sql/001_david.sql",
+      "uid": "b97f8a96a56bde4a7bcf831677b1c37146d6689b"
+    },
+    {
+      "path": "src/app.js",
+      "uid": "65724043ef85527f2d54ef8db8bffe729ddce354"
+    },
+    {
+      "path": "src/bootstrap.js",
+      "uid": "7c8e192167b5c0895e398a542ad8af76de4cf0ed"
+    },
+    {
+      "path": "src/budget-ui.js",
+      "uid": "91e85c797dd68db3a399e718a9ac0c2788f1795d"
+    },
+    {
+      "path": "src/company-crm.js",
+      "uid": "f49781567597decb7921a5ee8bef9896b48ada3f"
+    },
+    {
+      "path": "src/console-v2.js",
+      "uid": "998757bd7005b48685fa264929e687fdc3aadca0"
+    },
+    {
+      "path": "src/flow-enhancements.js",
+      "uid": "6bdc6c7d4a7c420fb0bd0fe7dba0722576090406"
+    },
+    {
+      "path": "src/google-auth.js",
+      "uid": "e87638d717868b097faaee181f1f96fbddd32f1c"
+    },
+    {
+      "path": "tests/static.test.mjs",
+      "uid": "405bbfb2476702921f430c7a4cb33250e268326f"
+    },
+    {
+      "path": "vercel.json",
+      "uid": "94839669cf55e95a0c876b79d72fa8651fdc1aad"
+    }
+  ]
+}
