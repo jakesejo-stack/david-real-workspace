@@ -48,7 +48,12 @@ function davidSupportInboxPage(){
   const company=g.companies.find(c=>c.id===t.company_id);
   return '<div class="company"><div class="row"><b>'+I(t.title)+'</b><span class="tag '+(t.status==="CLOSED"?"green":"orange")+'">'+I(t.status)+'</span></div>'
   +'<div class="tiny">'+I(company?.company_name||"Свързана фирма")+' · '+I(t.severity)+' · '+I(t.category)+' · '+I(js(t.created_at))+'</div>'
-  +'<p class="tiny">Ticket ID: '+I(t.id)+'</p></div>';
+  +'<p class="tiny">Ticket ID: '+I(t.id)+'</p>'
+  +(canAdmin?'<div class="row" style="margin-top:10px"><select class="field" data-ticket-state="'+I(t.id)+'">'
+   +["NEW","TRIAGED","ASSIGNED","IN_PROGRESS","NEEDS_INFO","FIX_IN_REVIEW","VERIFIED","CLOSED","REOPENED"].map(state=>'<option value="'+state+'" '+(state===t.status?"selected":"")+'>'+state+'</option>').join("")
+   +'</select><select class="field" data-ticket-worker="'+I(t.id)+'"><option value="">Без назначен оператор</option>'
+   +(g.identities||[]).filter(w=>w.active).map(w=>'<option value="'+I(w.worker_id)+'" '+(w.worker_id===t.assigned_worker_id?"selected":"")+'>'+I((g.members||[]).find(m=>m.user_id===w.user_id)?.display_name||w.worker_id)+'</option>').join("")
+   +'</select><button class="btn" data-ticket-save="'+I(t.id)+'">Запази статус</button></div>':'')+'</div>';
  }).join("");
  const form=canAdmin?'<div class="card"><h2>Нов вътрешен DPP ticket</h2><p class="tiny">Този тикет е в Call Desk. Клиентският Report Issue в DPP Autopilot изисква отделна сигурна интеграция и не е свързан автоматично.</p>'
  +'<form id="davidNewTicketForm"><label><small>Фирма</small><select class="field" name="company" required>'
@@ -61,6 +66,15 @@ function davidSupportInboxPage(){
  form+'<div class="card"><div class="row"><h2>Ticket Inbox</h2><span class="tag">'+items.length+' реални записа</span><button class="btn" id="davidTicketReload">↻ Обнови</button></div>'
  +(rows||'<p class="tiny">Няма получени DPP тикети.</p>')+'</div>';
  N("davidTicketReload").onclick=()=>Pe();
+ if(canAdmin)document.querySelectorAll("[data-ticket-save]").forEach(button=>button.onclick=async()=>{
+   const ticketId=button.dataset.ticketSave;
+   const status=document.querySelector('[data-ticket-state="'+ticketId+'"]')?.value;
+   const worker=document.querySelector('[data-ticket-worker="'+ticketId+'"]')?.value||null;
+   button.disabled=true;
+   const{data,error}=await g.db.rpc("david_admin_update_ticket",{p_ticket_id:ticketId,p_status:status,p_worker_id:worker});
+   if(error){re("Неуспешна промяна на тикета: "+error.message);button.disabled=false;return}
+   if(data?.ok)await Pe();else{re("Промяната не е потвърдена");button.disabled=false}
+ });
  const f=N("davidNewTicketForm");
  if(!f)return;
  f.onsubmit=async event=>{
