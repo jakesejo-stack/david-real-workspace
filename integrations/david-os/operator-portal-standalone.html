@@ -41,11 +41,13 @@ a{color:#e7b96b}.footer{margin-top:32px;color:#8e8782;font-size:12px}
 </div>
 <div id="signedin" hidden>
 <div class="info"><span class="user" id="username"></span><button type="button" id="signout" class="subtle">Изход от Google</button></div>
+<a id="adminlink" href="/admin.html" hidden class="num">Админ · Workers / Companies / Results</a>
 <div id="activation">
 <form id="codeform">
 <label for="code">Персонален служебен код</label>
 <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="#XXXXXXXXXXXX!" required pattern="#[A-HJ-NP-Z2-9]{12}!">
-<div class="actions"><button type="submit" id="activate">Активирай работното пространство</button><a class="num" href="https://david-real-workspace.vercel.app/" target="_blank" rel="noopener">Отвори Call Desk за код</a></div>
+<div class="actions"><button type="submit" id="activate">Активирай работното пространство</button><button type="button" id="issue" class="secondary">Издай нов код</button><a class="num" href="https://david-real-workspace.vercel.app/" target="_blank" rel="noopener">Отвори Call Desk</a></div>
+<div id="issued" role="status" aria-live="polite" class="note" hidden></div>
 </form>
 <p class="note">Кодът е валиден до 12 минути и се използва само веднъж. Не го изпращай по имейл, чат или снимка.</p>
 </div>
@@ -72,8 +74,10 @@ async function displayState(){
   const {data:{user},error}=await db.auth.getUser();
   currentUser=error?null:user;
   show('signedin',!!currentUser);show('signedout',!currentUser);
-  if(!currentUser){show('activation',false);show('desk',false);return}
+  if(!currentUser){show('activation',false);show('desk',false);show('adminlink',false);return}
   el('username').textContent=currentUser.email || 'Google акаунт';
+  const {data:membership}=await db.from('david_members').select('role').eq('user_id',currentUser.id).maybeSingle();
+  show('adminlink',membership?.role==='admin');
   const {data:snapshot,error:snapError}=await db.rpc('david_operator_portal_snapshot');
   if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);return}
   if(snapshot?.active){
@@ -91,6 +95,40 @@ async function displayState(){
       if(c.calling_approved && !c.do_not_call && /^\+[1-9]\d{5,14}$/.test(c.phone||'')){
         const a=addText('a',c.phone,'num');a.href='tel:'+c.phone;card.append(a);
       }
+      if(c.calling_approved && !c.do_not_call && /^\+[1-9]\d{5,14}$/.test(c.phone||'')){
+        const form=document.createElement('form');
+        const label=document.createElement('label');label.textContent='Резултат от реален ръчен контакт';
+        const select=document.createElement('select');select.required=true;select.setAttribute('aria-label','Резултат');
+        select.style.cssText='width:100%;background:#111417;color:white;padding:10px;border-radius:8px';
+        for(const [v,text] of [['no_answer','Неотговорено'],['declined','Отказ'],['interested','Интерес'],['callback','Обратно обаждане'],['do_not_contact','Без повече контакт']]){
+          select.append(new Option(text,v));
+        }
+        const notes=document.createElement('textarea');notes.placeholder='Истинска бележка за контакта';notes.maxLength=2000;notes.rows=3;notes.style.cssText='width:100%;background:#111417;color:white;padding:10px;border-radius:8px;margin-top:8px';
+        const follow=document.createElement('input');follow.type='datetime-local';follow.title='Следващ контакт';follow.style.marginTop='8px';
+        const confirm=document.createElement('label');confirm.style.cssText='font-size:12px;color:#e7b96b;display:block;margin-top:10px';
+        const box=document.createElement('input');box.type='checkbox';box.required=true;box.style.cssText='width:auto;margin-right:8px';
+        confirm.append(box,document.createTextNode('Потвърждавам, че действително опитах да се свържа ръчно по разрешения служебен телефон.'));
+        const submit=document.createElement('button');submit.type='submit';submit.textContent='Запиши CRM резултат';submit.style.marginTop='10px';
+        const feedback=document.createElement('div');feedback.setAttribute('role','status');feedback.style.marginTop='8px';
+        label.append(select);form.append(label,notes,follow,confirm,submit,feedback);
+        form.addEventListener('submit',async ev=>{
+          ev.preventDefault();
+          if(!box.checked){feedback.textContent='Потвърди действителен контакт.';return}
+          if(select.value==='callback'&&!follow.value){feedback.textContent='За обратно обаждане избери дата.';return}
+          submit.disabled=true;
+          const {data,error}=await db.rpc('david_record_manual_contact',{
+            p_company_id:c.id,p_outcome:select.value,p_notes:notes.value,
+            p_followup_at:follow.value?new Date(follow.value).toISOString():null,p_contact_confirmed:true
+          });
+          submit.disabled=false;
+          if(error){feedback.textContent='Грешка при запис: '+error.message;return}
+          if(!data?.ok){feedback.textContent='Няма потвърден запис.';return}
+          feedback.textContent='Записано в CRM. ID: '+data.record_id;
+          if(select.value==='do_not_contact')await displayState();
+          else {notes.value='';follow.value='';box.checked=false}
+        });
+        card.append(form);
+      }
       container.append(card);
     }
     msg('Служебната сесия е активна. Данните са ограничени до назначените фирми.');
@@ -107,6 +145,17 @@ el('google').addEventListener('click',async ()=>{
   buttonBusy(el('google'),true);
   const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});
   if(error){msg('Google вход: '+error.message,true);buttonBusy(el('google'),false)}
+});
+el('issue').addEventListener('click',async ()=>{
+  if(!currentUser){msg('Нужен е Google вход.',true);return}
+  const button=el('issue');button.disabled=true;el('issued').hidden=true;el('issued').textContent='';
+  const {data,error}=await db.rpc('david_generate_link_code');
+  button.disabled=false;
+  if(error){msg('Не мога да издам код: '+error.message,true);return}
+  if(!data?.active||!data?.code){msg('Няма издаден код.',true);return}
+  el('issued').hidden=false;
+  el('issued').textContent='Твоят еднократен код: '+data.code+' · Изтича след 12 минути. Не го споделяй.';
+  msg('Издаден е код за текущия Google профил. Въведи го в полето по-горе.');
 });
 el('codeform').addEventListener('submit',async e=>{
   e.preventDefault();if(!currentUser){msg('Първо влез с Google.',true);return}
