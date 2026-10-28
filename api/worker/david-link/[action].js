@@ -26,7 +26,7 @@ export default async function handler(req,res){
     .select('linked_at,last_verified_at,revoked_at,provider').eq('worker_id',identity.worker_id).is('revoked_at',null).limit(1);
   if(linkError)return response(res,503,{error:'link_lookup_unavailable'});
   return response(res,200,{worker_id:identity.worker_id,organization_id:identity.organization_id,
-   active:true,david_linked:!!links?.length,linked_at:links?.[0]?.linked_at||null,
+   active:true,david_linked:!!links?.length,integration_ready:!!(process.env.DAVID_LINK_CODE_PEPPER&&process.env.DAVID_BRIDGE_SHARED_SECRET&&process.env.SUPABASE_SERVICE_ROLE_KEY),linked_at:links?.[0]?.linked_at||null,
    david_url:'https://david-os-rust.vercel.app/work'});
  }catch{return response(res,503,{error:'link_service_unavailable'})}
 }
