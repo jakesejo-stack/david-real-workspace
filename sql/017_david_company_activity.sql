@@ -19,3 +19,33 @@ grant select on public.david_company_interactions to authenticated;
 create policy david_company_interactions_admin_self_read on public.david_company_interactions for select to authenticated using (
  david_internal.david_is_active_member() and (david_internal.david_is_admin() or worker_user_id=(select auth.uid()))
 );
+
+create or replace function public.david_admin_create_company_task(
+ p_worker_user_id uuid, p_company_id uuid, p_title text,
+ p_description text default '', p_priority text default 'P2',p_due_at timestamptz default null)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_task uuid; v_email text;
+begin
+ if not david_internal.david_is_admin() then raise exception 'Admin required' using errcode='42501';end if;
+ if length(trim(coalesce(p_title,''))) not between 4 and 180
+ or length(coalesce(p_description,''))>6000 or p_priority not in ('P0','P1','P2','P3')
+ then raise exception 'Invalid task' using errcode='22023';end if;
+ select u.email into v_email from auth.users u
+ join public.david_members m on m.user_id=u.id and m.role='worker'
+ join public.david_worker_identities i on i.user_id=u.id and i.active=true
+ where u.id=p_worker_user_id and u.email_confirmed_at is not null
+ and exists(select 1 from auth.identities ai where ai.user_id=u.id and ai.provider='google');
+ if v_email is null then raise exception 'Active approved Google operator required' using errcode='42501';end if;
+ if not exists(select 1 from public.david_companies where id=p_company_id) then
+  raise exception 'Unknown company' using errcode='22023';end if;
+ perform public.david_admin_assign_company(p_company_id,p_worker_user_id);
+ insert into public.david_admin_tasks(title,description,status,priority,assigned_to,company_id,created_by,source,due_at)
+ values(trim(p_title),coalesce(p_description,''),'TODO',p_priority,
+ p_worker_user_id,p_company_id,auth.uid(),'human',p_due_at) returning id into v_task;
+ insert into public.david_audit_events(actor_id,action,company_id,details)
+ values(auth.uid(),'company_task_assigned',p_company_id,
+ jsonb_build_object('task_id',v_task,'worker_user_id',p_worker_user_id));
+ return jsonb_build_object('ok',true,'task_id',v_task,'company_id',p_company_id,'recipient',v_email);
+end $$;
+revoke all on function public.david_admin_create_company_task(uuid,uuid,text,text,text,timestamptz) from public,anon;
+grant execute on function public.david_admin_create_company_task(uuid,uuid,text,text,text,timestamptz) to authenticated;
