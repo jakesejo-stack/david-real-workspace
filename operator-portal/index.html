@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SoulFlame · DPP Operator Login</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{color-scheme:dark;font:16px/1.5 Inter,system-ui,Segoe UI,sans-serif;--gold:#d6a452;--ink:#0c0d0e;--card:#191919;--line:#4c3a26;--white:#f5f0e9}
+*{box-sizing:border-box}body{background:radial-gradient(circle at 70% 12%,#2b2215 0,#100f0d 40%,#090b0d 80%);color:var(--white);min-height:100vh;margin:0}
+main{width:min(1020px,calc(100% - 32px));margin:0 auto;padding:55px 0 70px}
+small.top{color:var(--gold);font-size:12px;letter-spacing:.18em;font-weight:700}h1{font-size:clamp(56px,10vw,100px);letter-spacing:-.07em;margin:6px 0 0;line-height:1}h2{font-size:clamp(24px,4vw,35px);margin:4px 0 12px}p{color:#bbb4ad}
+.panel{margin-top:36px;width:min(790px,100%);padding:clamp(20px,4vw,42px);background:linear-gradient(140deg,#25221f,#131518);border:1px solid var(--line);border-radius:25px;box-shadow:0 30px 55px #0006}
+.pill{display:inline-flex;padding:7px 12px;border:1px solid #73502e;border-radius:100px;color:var(--gold);font-size:12px;font-weight:700;letter-spacing:.12em}
+label{display:block;font-size:13px;font-weight:650;margin:22px 0 8px}input{background:#111417;border:1px solid #4a433d;border-radius:12px;padding:15px 16px;color:white;width:100%;font:inherit;letter-spacing:.08em}input:focus{outline:2px solid var(--gold)}
+button{border:0;border-radius:11px;min-height:48px;padding:13px 21px;font-weight:750;cursor:pointer;background:var(--gold);color:#1b1710;font-size:15px}button:disabled{opacity:.52;cursor:wait}
+button.secondary{background:#322b21;border:1px solid #7c5b32;color:#f6dfb9}button.subtle{background:#212227;color:#ddd;font-size:13px;min-height:40px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}.actions>*{flex:1 1 160px}
+.note{font-size:13px;line-height:1.6;color:#d2ab70;border-top:1px solid #493b2d;margin:24px 0 0;padding-top:17px}
+#message{color:#ffe5aa;min-height:20px;margin-top:13px}#message[role=alert]{color:#ffaca4}
+.info{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.user{color:#ccc;font-size:13px;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:13px;margin-top:20px}
+.company{background:#131820;padding:18px;border:1px solid #403c34;border-radius:14px}
+.company h3{margin:0 0 5px;font-size:18px}.meta{color:#b9a99b;font-size:13px}
+.num{display:inline-flex;margin-top:12px;padding:8px 12px;border:1px solid #705432;border-radius:8px;color:var(--gold);text-decoration:none}
+.empty{border:1px dashed #5f503c;border-radius:12px;padding:24px;color:#b4a59a}
+a{color:#e7b96b}.footer{margin-top:32px;color:#8e8782;font-size:12px}
+@media(max-width:600px){main{padding-top:25px}.panel{margin-top:26px}}
+</style>
+</head><body>
+<main>
+<small class="top">SOULFLAME / PRIVATE WORKSPACE</small>
+<h1>DPP</h1>
+<p>Служебно работно пространство за одобрени оператори. Google идентичност + персонален еднократен код.</p>
+<section class="panel">
+<span class="pill">SECURE OPERATOR ACCESS</span>
+<h2>Вход за DPP оператор</h2>
+<p>Въведи кода, издаден в Call Desk, след като влезеш с одобрения Google акаунт.</p>
+<div id="signedout">
+<button id="google" type="button">Избери Google акаунт</button>
+<p class="note">Регистрацията не дава автоматично права. Администраторът трябва да е активирал оператора. Няма режим Guest за CRM.</p>
+</div>
+<div id="signedin" hidden>
+<div class="info"><span class="user" id="username"></span><button type="button" id="signout" class="subtle">Изход от Google</button></div>
+<a id="adminlink" href="/admin-dashboard.html" hidden class="num">⚙ Admin Command Center · Статистики и управление</a>
+<div id="activation">
+<form id="codeform">
+<label for="code">Персонален служебен код</label>
+<input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="#XXXXXXXXXXXX!" required pattern="#[A-HJ-NP-Z2-9]{12}!">
+<div class="actions"><button type="submit" id="activate">Активирай работното пространство</button><button type="button" id="issue" class="secondary">Издай нов код</button><a class="num" href="https://david-real-workspace.vercel.app/" target="_blank" rel="noopener">Отвори Call Desk</a></div>
+<div id="issued" role="status" aria-live="polite" class="note" hidden></div>
+</form>
+<p class="note">Кодът е валиден до 12 минути и се използва само веднъж. Не го изпращай по имейл, чат или снимка.</p>
+</div>
+<div id="desk" hidden>
+<div class="info"><span class="pill" id="role">ОПЕРАТОР</span><span class="user" id="expires"></span></div>
+<h2>Моите фирми</h2>
+<label for="company-search">🔎 Търсачка в Моите фирми</label>
+<input id="company-search" type="search" placeholder="Търси фирма, държава или сектор" autocomplete="off" style="letter-spacing:normal">
+<p class="note" id="company-count" role="status" style="margin-top:10px">Само назначените на теб фирми</p>
+<div class="grid" id="companies"></div>
+<div class="actions"><button type="button" class="secondary" id="refresh">Обнови</button><button type="button" class="subtle" id="lock">Заключи сесията</button></div>
+</div>
+</div>
+<div id="message" aria-live="polite"></div>
+</section>
+<div class="footer">DAVID DPP Operator Portal · Отделен от DAVID OS /work · Няма активирани Twilio обаждания или записи.</div>
+</main>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/+esm';
+const db=createClient('https://lyyqfpbrgjsxdqukwurl.supabase.co',"sb_publishable_vmL558NJwhKaYbnDzvQ0rA_EXl_c9K_",{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const el=id=>document.getElementById(id);
+let currentUser=null;
+const msg=(message,fail=false)=>{const x=el('message');x.textContent=message;x.setAttribute('role',fail?'alert':'status')};
+const buttonBusy=(button,busy)=>{button.disabled=busy};
+function show(id,visible){el(id).hidden=!visible}
+function addText(tag,text,cls=''){const x=document.createElement(tag);x.textContent=text;if(cls)x.className=cls;return x}
+async function displayState(){
+  const {data:{user},error}=await db.auth.getUser();
+  currentUser=error?null:user;
+  show('signedin',!!currentUser);show('signedout',!currentUser);
+  if(!currentUser){show('activation',false);show('desk',false);show('adminlink',false);return}
+  el('username').textContent=currentUser.email || 'Google акаунт';
+  const {data:membership}=await db.from('david_members').select('role').eq('user_id',currentUser.id).maybeSingle();
+  show('adminlink',membership?.role==='admin');
+  const {data:snapshot,error:snapError}=await db.rpc('david_operator_portal_snapshot');
+  if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);return}
+  if(snapshot?.active){
+    show('activation',false);show('desk',true);
+    el('role').textContent=snapshot.role==='admin'?'ADMIN':'ОПЕРАТОР';
+    el('expires').textContent='До '+new Date(snapshot.expires_at).toLocaleString('bg-BG');
+    const container=el('companies');container.replaceChildren();
+    const companies=Array.isArray(snapshot.companies)?snapshot.companies:[];
+    // RLS protects operator-specific manual history; no cross-operator data.
+    const ids=companies.map(c=>c.id).filter(Boolean);
+    let history=[];
+    if(ids.length){
+      const {data, error:historyError}=await db.from('david_manual_contact_results')
+       .select('company_id,outcome,notes,created_at,followup_at')
+       .eq('worker_user_id',currentUser.id).in('company_id',ids)
+       .order('created_at',{ascending:false}).limit(300);
+      if(!historyError)history=data||[];
+    }
+    const showFiltered=()=>{
+      const q=el('company-search').value.trim().toLocaleLowerCase('bg-BG');
+      let visible=0;
+      container.querySelectorAll('[data-search]').forEach(card=>{
+        card.hidden=!!q&&!card.dataset.search.includes(q);
+        if(!card.hidden) visible++;
+      });
+      el('company-count').textContent=visible+' от '+companies.length+' назначени фирми · Личен списък';
+    };
+    if(!companies.length)container.append(addText('div','Засега нямаш назначени фирми.','empty'));
+    for(const c of companies){
+      const card=addText('article',null,'company');
+      card.dataset.search=[c.name,c.country,c.sector].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
+      card.append(addText('h3',c.name),addText('div',(c.country||'')+' · '+(c.sector||''),'meta'));
+      const state=c.do_not_call?'Без контакт':c.calling_approved?'Одобрен за контакт':'Очаква разрешение';
+      card.append(addText('p',state,'meta'));
+      const mine=history.filter(r=>r.company_id===c.id);
+      const historySection=addText('details',null,'');
+      const summary=addText('summary','Моя история на контактите ('+mine.length+')');
+      historySection.append(summary);
+      if(!mine.length)historySection.append(addText('p','Още няма записан твой резултат.','meta'));
+      for(const h of mine.slice(0,10)){
+        const when=new Date(h.created_at).toLocaleString('bg-BG');
+        const next=h.followup_at?' · Следващо: '+new Date(h.followup_at).toLocaleString('bg-BG'):'';
+        historySection.append(addText('p',when+' · '+h.outcome+(h.notes?' · '+h.notes:'')+next,'meta'));
+      }
+      card.append(historySection);
+      if(c.calling_approved && !c.do_not_call && /^\+[1-9]\d{5,14}$/.test(c.phone||'')){
+        const a=addText('a',c.phone,'num');a.href='tel:'+c.phone;card.append(a);
+      }
+      if(c.calling_approved && !c.do_not_call && /^\+[1-9]\d{5,14}$/.test(c.phone||'')){
+        const form=document.createElement('form');
+        const label=document.createElement('label');label.textContent='Резултат от реален ръчен контакт';
+        const select=document.createElement('select');select.required=true;select.setAttribute('aria-label','Резултат');
+        select.style.cssText='width:100%;background:#111417;color:white;padding:10px;border-radius:8px';
+        for(const [v,text] of [['no_answer','Неотговорено'],['declined','Отказ'],['interested','Интерес'],['callback','Обратно обаждане'],['do_not_contact','Без повече контакт']]){
+          select.append(new Option(text,v));
+        }
+        const notes=document.createElement('textarea');notes.placeholder='Истинска бележка за контакта';notes.maxLength=2000;notes.rows=3;notes.style.cssText='width:100%;background:#111417;color:white;padding:10px;border-radius:8px;margin-top:8px';
+        const follow=document.createElement('input');follow.type='datetime-local';follow.title='Следващ контакт';follow.style.marginTop='8px';
+        const confirm=document.createElement('label');confirm.style.cssText='font-size:12px;color:#e7b96b;display:block;margin-top:10px';
+        const box=document.createElement('input');box.type='checkbox';box.required=true;box.style.cssText='width:auto;margin-right:8px';
+        confirm.append(box,document.createTextNode('Потвърждавам, че действително опитах да се свържа ръчно по разрешения служебен телефон.'));
+        const submit=document.createElement('button');submit.type='submit';submit.textContent='Запиши CRM резултат';submit.style.marginTop='10px';
+        const feedback=document.createElement('div');feedback.setAttribute('role','status');feedback.style.marginTop='8px';
+        label.append(select);form.append(label,notes,follow,confirm,submit,feedback);
+        form.addEventListener('submit',async ev=>{
+          ev.preventDefault();
+          if(!box.checked){feedback.textContent='Потвърди действителен контакт.';return}
+          if(select.value==='callback'&&!follow.value){feedback.textContent='За обратно обаждане избери дата.';return}
+          submit.disabled=true;
+          const {data,error}=await db.rpc('david_record_manual_contact',{
+            p_company_id:c.id,p_outcome:select.value,p_notes:notes.value,
+            p_followup_at:follow.value?new Date(follow.value).toISOString():null,p_contact_confirmed:true
+          });
+          submit.disabled=false;
+          if(error){feedback.textContent='Грешка при запис: '+error.message;return}
+          if(!data?.ok){feedback.textContent='Няма потвърден запис.';return}
+          feedback.textContent='Записано в CRM. ID: '+data.record_id;
+          notes.value='';follow.value='';box.checked=false;
+          await displayState();
+        });
+        card.append(form);
+      }
+      container.append(card);
+    }
+    showFiltered();
+    msg('Служебната сесия е активна. Търсачката и личната история са само за твоите назначени фирми.');
+  }else{
+    const approved=snapshot?.reason==='code_required';
+    show('activation',approved);show('desk',false);
+    if(snapshot?.reason==='not_approved')
+      msg('Влязъл си като '+(currentUser.email||'непознат акаунт')+', но този профил НЕ е одобрен за DPP. Натисни „Изход от Google“, после „Избери Google акаунт“ и влез с одобрения профил от Call Desk.',true);
+    else if(approved)msg('Акаунтът е одобрен. Генерирай НОВ код от Call Desk със същия Google профил и го въведи тук.');
+    else msg('Достъпът още не е разрешен. Свържи се с администратора.',true);
+  }
+}
+el('google').addEventListener('click',async ()=>{
+  buttonBusy(el('google'),true);
+  const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});
+  if(error){msg('Google вход: '+error.message,true);buttonBusy(el('google'),false)}
+});
+el('issue').addEventListener('click',async ()=>{
+  if(!currentUser){msg('Нужен е Google вход.',true);return}
+  const button=el('issue');button.disabled=true;el('issued').hidden=true;el('issued').textContent='';
+  const {data,error}=await db.rpc('david_generate_link_code');
+  button.disabled=false;
+  if(error){msg('Не мога да издам код: '+error.message,true);return}
+  if(!data?.active||!data?.code){msg('Няма издаден код.',true);return}
+  el('issued').hidden=false;
+  el('issued').textContent='Твоят еднократен код: '+data.code+' · Изтича след 12 минути. Не го споделяй.';
+  msg('Издаден е код за текущия Google профил. Въведи го в полето по-горе.');
+});
+el('codeform').addEventListener('submit',async e=>{
+  e.preventDefault();if(!currentUser){msg('Първо влез с Google.',true);return}
+  const code=el('code').value.trim().toUpperCase();
+  if(!/^#[A-HJ-NP-Z2-9]{12}!$/.test(code)){msg('Невалиден формат. Използвай кода от Call Desk (# + 12 символа + !).',true);return}
+  buttonBusy(el('activate'),true);
+  const {data,error}=await db.rpc('david_operator_portal_activate',{p_code:code});
+  el('code').value='';
+  buttonBusy(el('activate'),false);
+  if(error){msg(error.message.includes('Approved active DPP member required')?'Този Google акаунт няма активни DPP права. Излез и избери одобрен акаунт, с който е генериран кодът.':'Неуспешна активация: '+error.message,true);return}
+  if(!data?.ok){msg(data?.reason==='rate_limited'?'Прекалено много опити. Опитай по-късно.':'Невалиден, изтекъл, използван или чужд код.',true);return}
+  await displayState();
+});
+el('company-search').addEventListener('input',()=>{
+ const q=el('company-search').value.trim().toLocaleLowerCase('bg-BG');
+ let visible=0;
+ el('companies').querySelectorAll('[data-search]').forEach(card=>{
+   card.hidden=!!q&&!card.dataset.search.includes(q);
+   if(!card.hidden)visible++;
+ });
+ el('company-count').textContent=visible+' показани фирми';
+});
+el('refresh').addEventListener('click',displayState);
+el('lock').addEventListener('click',async ()=>{
+  const {error}=await db.rpc('david_operator_portal_logout');
+  if(error){msg('Не мога да заключа сесията: '+error.message,true);return}
+  await displayState();msg('Служебната сесия е заключена.');
+});
+el('signout').addEventListener('click',async ()=>{
+  try{await db.rpc('david_operator_portal_logout')}catch{}
+  await db.auth.signOut();await displayState();msg('Излезе от Google.');
+});
+await displayState();
+</script>
+</body></html>
