@@ -29,6 +29,7 @@ begin
  if not david_internal.david_is_admin() then raise exception 'Admin required' using errcode='42501';end if;
  if length(trim(coalesce(p_title,''))) not between 4 and 180
  or length(coalesce(p_description,''))>6000 or p_priority not in ('P0','P1','P2','P3')
+ or (p_due_at is not null and (p_due_at < now()-interval '5 minutes' or p_due_at > now()+interval '365 days'))
  then raise exception 'Invalid task' using errcode='22023';end if;
  select u.email into v_email from auth.users u
  join public.david_members m on m.user_id=u.id and m.role='worker'
@@ -63,7 +64,7 @@ begin
  'priority',t.priority,'status',t.status,'due_at',t.due_at,'created_at',t.created_at)
  order by t.created_at desc),'[]'::jsonb) into v_tasks
  from public.david_admin_tasks t left join public.david_companies c on c.id=t.company_id
- where t.assigned_to=v_uid;
+ where t.assigned_to=v_uid and (t.company_id is null or c.assigned_to=v_uid);
  return v_tasks;
 end $$;
 revoke all on function public.david_worker_my_tasks() from public,anon;
