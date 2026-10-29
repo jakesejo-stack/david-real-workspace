@@ -74,3 +74,71 @@ export async function companyDetail(db,companyId) {
  if(result?.ok!==true) throw new Error('Нямаш достъп до тази фирма');
  return result;
 }
+
+function el(doc,tag,text='',attrs={}) {
+ const x=doc.createElement(tag);
+ x.textContent=String(text);
+ for (const [key,value] of Object.entries(attrs)) x.setAttribute(key,String(value));
+ return x;
+}
+function field(doc,label,type='text',value='') {
+ const box=el(doc,'label');box.append(el(doc,'span',label));
+ const input=el(doc,'input');input.type=type;input.value=value;box.append(input);
+ return {box,input};
+}
+function showError(container,err) {
+ container.append(el(container.ownerDocument,'p',String(err?.message||err),{role:'alert'}));
+}
+
+export function mountOperatorApplication(container,db) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Кандидатстване за оператор'));
+ const form=el(d,'form');
+ const name=field(d,'Име и фамилия'),country=field(d,'Държава');
+ const languages=field(d,'Говорими езици (разделени със запетая)');
+ const phone=field(d,'Телефон с международен код (напр. +359...)','tel');
+ const submit=el(d,'button','Изпрати за одобрение');submit.type='submit';
+ form.append(name.box,country.box,languages.box,phone.box,submit);
+ form.addEventListener('submit',async event=>{
+  event.preventDefault();submit.disabled=true;
+  try{
+   await submitApplication(db,{name:name.input.value,country:country.input.value,
+    languages:languages.input.value.split(','),phone:phone.input.value});
+   form.replaceChildren(el(d,'p','Кандидатурата е изпратена. Очаква одобрение от администратор.'));
+  }catch(e){showError(form,e);submit.disabled=false}
+ });
+ container.append(form);return form;
+}
+
+export async function mountAdminApplications(container,db) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Кандидатури за оператор'));
+ try {
+  for(const a of await adminApplications(db)){
+   const card=el(d,'section');
+   card.append(el(d,'strong',a.name+' — '+a.email));
+   card.append(el(d,'p','Държава: '+a.country));
+   card.append(el(d,'p','Езици: '+(a.languages||[]).join(', ')));
+   card.append(el(d,'p','Телефон: '+a.phone));
+   card.append(el(d,'p','Статус: '+a.status));
+   if(a.status==='pending'){
+    const role=el(d,'select');
+    for(const v of ['operator','test','test2']) {
+     const o=el(d,'option',v);o.value=v;role.append(o);
+    }
+    const approve=el(d,'button','Одобри');approve.type='button';
+    approve.addEventListener('click',async()=>{
+     approve.disabled=true;
+     try{
+      const r=await rpc(db,'david_admin_review_google_access',{
+       p_user_id:a.user_id,p_approve:true,p_operator_kind:role.value});
+      if(r?.ok!==true)throw new Error('Одобрението не е потвърдено');
+      await mountAdminApplications(container,db);
+     }catch(e){showError(card,e);approve.disabled=false}
+    });
+    card.append(role,approve);
+   }
+   container.append(card);
+  }
+ }catch(e){showError(container,e)}
+}
