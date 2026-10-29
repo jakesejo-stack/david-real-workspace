@@ -57,6 +57,7 @@ Related Bugzilla thread: https://bugzilla.mozilla.org/show_bug.cgi?id=1299324`):
  }catch(error){nn("Проблем с Google одобрението: "+String(error?.message||error))}
 }
 function davidPendingGoogle(status){
+ if(document.getElementById("davidMitkoApplication") && status!=="blocked" && status!=="rejected")return;
  const blocked=status==="blocked"||status==="rejected";
  const msg=blocked?"Достъпът е отказан или отнет. Свържи се с администратор.":"Заявката за достъп е изпратена. Изчакай Борко или Митко да те одобрят.";
  N("root").innerHTML='<div class="login card"><div class="brand">◇ DAVID<i>.</i></div>'+
@@ -65,6 +66,13 @@ function davidPendingGoogle(status){
   '<button id="davidPendingRetry" class="btn primary" type="button">↻ Провери отново</button> '+
   '<button id="davidPendingLogout" class="btn" type="button">Изход</button>'+
   '<p class="tiny">Без админско одобрение няма достъп до фирми, задачи или телефони.</p></div>';
+ if(!blocked){
+  const container=document.createElement("section");container.id="davidMitkoApplication";
+  container.style.marginTop="18px";N("root").querySelector(".login")?.append(container);
+  import("/david-modules/operator-company-workflows.mjs").then(m=>{
+   if(container.isConnected)m.mountOperatorApplication(container,g.db);
+  }).catch(err=>{container.textContent="Кандидатстването не е заредено: "+String(err?.message||err)});
+ }
  N("davidPendingRetry").onclick=()=>ou();
  N("davidPendingLogout").onclick=async()=>{if(g.davidPendingCleanup)g.davidPendingCleanup();await g.db.auth.signOut();location.reload()};
  if(!blocked){
@@ -101,6 +109,14 @@ async function davidTaskPage(){
  page.innerHTML=Ct("ЗАДАЧИ · DppCenterAdmin","Работният ти център. След Google одобрение задачите се показват автоматично, без личен код.")+
   '<div class="card" id="davidTasksLoad" role="status">🔐 Проверявам Google одобрението и задачите…</div><div id="dppTaskRoot"></div>';
  const root=N("dppTaskRoot");
+ if(g.role==="worker"){
+  import("/david-modules/operator-company-workflows.mjs").then(async m=>{
+   await m.myTasks(g.db);
+   if(g.view!=="tasks"||!page.isConnected)return;
+   const extra=document.createElement("section");extra.id="davidMitkoWorkerTasks";extra.className="card";page.append(extra);
+   await m.mountWorkerTasks(extra,g.db);
+  }).catch(err=>console.info("[DAVID] New tasks awaiting SQL 016–018",err?.message||err));
+ }
  async function request(action,payload){
   const {data:{session},error:sessionError}=await g.db.auth.getSession();
   if(sessionError||!session?.access_token)throw Error("Влез отново с Google.");
@@ -140,6 +156,15 @@ async function davidTaskPage(){
 }
 
 function davidMyCompaniesPage(){
+ if(g.role==="worker"&&g.db){
+  import("/david-modules/operator-company-workflows.mjs").then(async m=>{
+   await m.myCompanies(g.db);
+   if(g.view!=="mycompanies")return;
+   const page=N("content");if(!page||document.getElementById("davidMitkoMyCompanies"))return;
+   const extra=document.createElement("section");extra.className="card";extra.id="davidMitkoMyCompanies";page.prepend(extra);
+   await m.mountMyCompanies(extra,g.db);
+  }).catch(err=>console.info("[DAVID] History awaits SQL 016–018",err?.message||err));
+ }
  const mine=(g.companies||[]).filter(c=>c.assigned_to===g.user?.id);
  const results=g.manualResults||[];
  const labels={no_answer:"Неотговорено",declined:"Отказ",interested:"Има интерес",callback:"Обратно обаждане",do_not_contact:"Без повече контакт"};
@@ -261,7 +286,7 @@ async function davidPendingAdminPanel(){
    if(!pending.length){list.innerHTML='<p class="muted">Няма чакащи заявки за операторски достъп.</p>';return}
    list.innerHTML=pending.map(r=>
     '<div class="row" style="padding:10px 0;gap:12px;flex-wrap:wrap;border-bottom:1px solid #ddd">'+
-    '<div><b>'+I(r.name||r.email||"Google потребител")+'</b><p class="tiny">'+I(r.email||"")+'</p></div>'+
+    '<div><b>'+I(r.name||r.email||"Google потребител")+'</b><p class="tiny">'+I(r.email||"")+'</p>'+(r.country?'<p class="tiny">'+I(r.country)+' · '+I((r.languages||[]).join(", "))+' · '+I(r.phone||"")+'</p>':"")+'</div>'+
     '<label class="tiny">Категория <select class="field" data-google-kind="'+I(r.user_id)+'"><option value="operator">Оператор</option><option value="test">Тест</option><option value="test2">Тест 2</option></select></label>'+
     '<button class="btn green" type="button" data-google-approve="'+I(r.user_id)+'">✓ Одобри оператор</button>'+
     '<button class="btn red" type="button" data-google-deny="'+I(r.user_id)+'">✕ Откажи</button></div>'
@@ -285,6 +310,13 @@ async function davidPendingAdminPanel(){
  };
  N("davidGoogleApprovalsReload").onclick=load;
  await load();
+ if(g.view==="admin" && panel.isConnected){
+  const mount=document.createElement("section");mount.className="card";mount.id="davidMitkoAdminCompanyTask";
+  panel.insertAdjacentElement("afterend",mount);
+  import("/david-modules/operator-company-workflows.mjs").then(m=>{
+   if(mount.isConnected)return m.mountAdminCompanyTask(mount,g.db,g.companies||[]);
+  }).catch(err=>{mount.textContent="Задачите за фирми изискват SQL 016–018: "+String(err?.message||err)});
+ }
 }
 function cu(){return[...new Map(g.companies.map(e=>[e.country_code||Ht(e.country)||e.country,e.country]))].sort((e,s)=>e[1].localeCompare(s[1],"bg")).map(([e,s])=>'<option value="'+I(e)+'" '+(g.country===e?"selected":"")+">"+I(s)+" ("+I(e)+")</option>").join("")}
 let davidManualIntakeOpen=false;
