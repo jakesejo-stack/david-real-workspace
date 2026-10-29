@@ -102,6 +102,22 @@ async function handleTaskStatus(req,res){
 
 export default async function handler(req,res){
  const action=req.query?.action;
+ if(action==='tryout-voice'){
+  if(!['GET','POST'].includes(req.method))return response(res,405,{error:'method_not_allowed'});
+  const twiml=new twilio.twiml.VoiceResponse();
+  const audio=String(process.env.DPP_BG_MALE_AUDIO_URL||'').trim();
+  const validAudio=(()=>{
+   try {const u=new URL(audio);return u.protocol==='https:'&&!u.username&&!u.password&&!u.hash&&/\.(mp3|wav|ogg)(?:$|\?)/i.test(u.pathname+u.search)} catch{return false}
+  })();
+  if(validAudio){twiml.play({loop:1},audio)}
+  else {twiml.say({voice:'Google.bg-BG-Standard-B',language:'bg-BG',loop:1},
+   'Това е тест на гласовата система Дейвид. Български мъжки глас все още не е настроен. Не се провежда разговор с клиент.')}
+  twiml.hangup();
+  res.setHeader('Content-Type','text/xml; charset=utf-8');
+  res.setHeader('Cache-Control','no-store');
+  res.setHeader('X-DAVID-Voice-Sample',validAudio?'external-male-audio':'twilio-female-fallback');
+  return res.status(200).send(twiml.toString());
+ }
  if(action==='task-token')return handleTaskToken(req,res);
  if(action==='task-voice')return handleTaskVoice(req,res);
  if(action==='task-status')return handleTaskStatus(req,res);
