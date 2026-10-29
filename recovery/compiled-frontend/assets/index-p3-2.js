@@ -309,12 +309,12 @@ function davidManualDesk(){
  '<p class="tiny">Тази симулация НЕ прави телефонно обаждане. В реалния Twilio режим сървърът блокира набиране без активна конфигурация.</p></div>'+
  '<div class="card" id="deskWorkerTask"><h2>📋 Задача за днес</h2><p class="muted">Зареждане…</p></div>'+
  '<div class="card" id="davidVoiceTryout"><div class="row"><h2>🎙 Български глас · TEST preview</h2><span class="tag orange">VOICE TEST · БЕЗ ОБАЖДАНЕ</span></div>'+
- '<p class="muted">Натисни „Пусни тестов глас“ долу: възпроизвежда вграден български мъжки синтетичен запис. Работи и без инсталирани Edge/Windows гласове, не звъни на номер и не ползва Twilio баланс. Това е технически образец, а не финален естествен невронен глас.</p>'+
+ '<p class="muted">Тестът използва наличните български гласове в Edge/Windows. Ако няма български глас, ще покаже ясно съобщение вместо да симулира успешно възпроизвеждане. Няма реално набиране и няма Twilio такси.</p>'+
  '<div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn '+(g.davidCallMode!=="real"?"green":"")+'" id="davidVoiceDemoMode" type="button">🎧 TEST Voice</button><button class="btn '+(g.davidCallMode==="real"?"green":"")+'" id="davidVoiceRealMode" type="button">☎ Real Twilio</button></div>'+
- '<div class="notice" id="davidVoicePreviewLabel" style="margin-top:10px">'+I(g.davidVoicePreviewStatus||"Готово за тест: натисни зеления бутон „Пусни тестов глас“ в долната лента. Не е телефонно обаждане.")+'</div>'+
- '<p class="tiny">Тестов MP3: <a href="/audio/david-bg-male-test.mp3" target="_blank" rel="noopener noreferrer">Слушай директно / провери аудиото</a>. Плътен естествен мъжки глас (Azure BorislavNeural) ще изисква отделна TTS интеграция.</p>'+
+ '<div class="notice" id="davidVoicePreviewLabel" style="margin-top:10px">'+I(g.davidVoicePreviewStatus||"Натисни „Пусни тестов глас“. Изисква инсталиран български глас в браузъра. Не е телефонно обаждане.")+'</div>'+
+ '<p class="tiny">Браузърен TEST Voice: без Twilio разходи. За гарантиран български мъжки глас е необходим лицензиран TTS аудиофайл и отделна интеграция.</p>'+
  '<p class="tiny">Custom TwiML адрес: <code>https://david-real-workspace.vercel.app/api/integrations/david/tryout-voice</code>. Когато има одобрен мъжки аудиофайл, Twilio ще го пуска с &lt;Play&gt;.</p></div>'+
- '<div class="dock"><div><b>☎ Live Call Desk · Free Call</b><div class="tiny" id="deskDialHint">'+(g.davidCallMode==="real"?"Реален разговор · изисква активен Twilio":"ТЕСТ · вграден български MP3 · без обаждане")+'</div></div>'+
+ '<div class="dock"><div><b>☎ Live Call Desk · Free Call</b><div class="tiny" id="deskDialHint">'+(g.davidCallMode==="real"?"Реален разговор · изисква активен Twilio":"ТЕСТ · български глас от браузъра · без обаждане")+'</div></div>'+
  '<div class="buttons"><button id="deskCallStart" class="btn green" type="button" '+(g.call||g.taskCallBusy||g.davidVoicePreviewPlaying?'disabled':'')+'>'+(g.davidCallMode==="real"?"☎ Start Real Call":"▶ Пусни тестов глас")+'</button><button id="deskCallEnd" class="btn red" type="button" '+(g.call||g.davidVoicePreviewPlaying?'':'disabled')+'>'+(g.davidCallMode==="real"?"■ End Call":"■ Спри гласа")+'</button></div></div>'+
  '<p class="tiny">Free Call означава разговор без фирмена резервация, не безплатен разговор. Twilio начислява такси след активиране. Обаждането е ограничено до одобрения номер по днешната задача.</p>';
  N("deskModeCompany").onclick=()=>{if(hasCompany){g.freeDeskMode=false;ct()}else{g.freeDeskMode=false;g.view="companies";ct()}};
@@ -337,30 +337,27 @@ function davidManualDesk(){
 
 function davidTryoutBulgarianVoice(){
  if(g.davidVoicePreviewPlaying||g.call||g.taskCallBusy)return;
- const audio=new Audio("/audio/david-bg-male-test.mp3");
- audio.preload="auto";
- audio.volume=1;
- g.davidVoiceAudio=audio;
- g.davidVoicePreviewPlaying=true;
- g.davidVoicePreviewStatus="🔊 Възпроизвеждам демонстрационния български мъжки глас. Без телефонно обаждане.";
- const done=(message)=>{
-  if(g.davidVoiceAudio!==audio)return;
-  g.davidVoiceAudio=null;
-  g.davidVoicePreviewPlaying=false;
-  g.davidVoicePreviewStatus=message;
-  if(N("davidVoicePreviewLabel"))N("davidVoicePreviewLabel").textContent=message;
-  if(g.freeDeskMode)davidManualDesk();
+ if(!("speechSynthesis" in window)||typeof SpeechSynthesisUtterance==="undefined"){
+  g.davidVoicePreviewStatus="Няма поддръжка за Speech Synthesis в този браузър.";return davidManualDesk();
+ }
+ const speak=()=>{
+  if(g.davidVoicePreviewPlaying)return;
+  const voices=window.speechSynthesis.getVoices();
+  const bg=voices.filter(v=>/^bg(?:-|$)/i.test(v.lang||""));
+  const male=bg.find(v=>/borislav|male|man|мъж/i.test(v.name||""));
+  const voice=male||bg[0];
+  if(!voice){g.davidVoicePreviewStatus="Няма наличен български глас. Инсталирай Bulgarian TTS в Windows или използвай Twilio Voice с подходящ аудиофайл.";return davidManualDesk()}
+  const u=new SpeechSynthesisUtterance("Здравейте. Аз съм Дейвид от Соулфлейм Ейджънси. Това е тест на гласовата система на български.");
+  u.lang="bg-BG";u.voice=voice;u.pitch=male?0.78:0.65;u.rate=0.84;u.volume=1;
+  g.davidVoicePreviewPlaying=true;g.davidVoicePreviewStatus="▶ Гласов тест: "+voice.name+" · без телефонно обаждане";
+  u.onend=()=>{g.davidVoicePreviewPlaying=false;g.davidVoicePreviewStatus="✅ Тестът приключи. Няма обаждане.";if(g.view==="desk")davidManualDesk()};
+  u.onerror=()=>{g.davidVoicePreviewPlaying=false;g.davidVoicePreviewStatus="⚠️ Проблем със звука. Провери Windows TTS и тонколоните.";if(g.view==="desk")davidManualDesk()};
+  window.speechSynthesis.cancel();davidManualDesk();window.speechSynthesis.speak(u);
  };
- audio.onended=()=>done("✅ Чухме целия тестов аудиозапис. Няма обаждане, такса или Call Record.");
- audio.onerror=()=>done("⚠️ Аудиото не се зареди. Отвори директния MP3 линк и провери звука.");
- // Start from the user's click so Edge does not block audio autoplay.
- const started=audio.play();
- if(started&&typeof started.then==="function")started.then(()=>{
-  if(g.davidVoiceAudio===audio)davidManualDesk();
- }).catch(err=>done("⚠️ Браузърът блокира звука ("+String(err?.name||"audio")+
- "). Натисни Start отново или отвори MP3 линка."));
- else davidManualDesk();
+ if(window.speechSynthesis.getVoices().length)speak();
+ else {g.davidVoicePreviewStatus="Проверявам инсталираните гласове…";davidManualDesk();window.speechSynthesis.addEventListener("voiceschanged",speak,{once:true});window.speechSynthesis.getVoices()}
 }
+
 async function davidStartTaskTwilio(){
  if(g.taskCallBusy||g.call)return;
  if(!g.config?.telephonyConfigured)return re("Twilio не е настроен. Администраторът трябва да добави ключовете и TwiML App във Vercel.");
