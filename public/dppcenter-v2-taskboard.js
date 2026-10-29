@@ -39,8 +39,16 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
     try{
       const data=await api.listTasks();
       if(!alive)return;
-      const tasks=Array.isArray(data?.tasks)?data.tasks:[];
+      if(!Array.isArray(data?.tasks))throw new Error('Invalid task list response');
+      const tasks=data.tasks;
+      const active=tasks.filter(t=>t.status!=='DONE').length;
       tasksBox.replaceChildren();
+      const summary=create('div','dpp-tasks-result',tasks.length
+        ?'✅ Има задачи: '+tasks.length+' общо, '+active+' активни.'
+        :'📭 Няма задачи. Засега нямаш възложена работа.');
+      summary.setAttribute('role','status');
+      summary.setAttribute('aria-live','polite');
+      tasksBox.append(summary);
       for(const item of tasks){
         const card=create('article','dpp-center-card');
         const details=create('details','dpp-center-details');
@@ -71,7 +79,7 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
         });
         details.append(controls,notes,noteForm);card.append(details);tasksBox.append(card);
       }
-      if(!tasks.length)tasksBox.append(create('p','dpp-center-empty','Няма възложени задачи.'));
+      if(!tasks.length)tasksBox.append(create('p','dpp-center-empty','Когато администратор ти възложи задача, тя ще се появи тук автоматично.'));
       hint.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG');
     }catch(err){hint.textContent='Връзката със задачите е временно недостъпна.';}
     finally{loading=false;}
