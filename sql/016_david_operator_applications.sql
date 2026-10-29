@@ -5,7 +5,7 @@ create table if not exists public.david_operator_applications (
  full_name text not null check(length(trim(full_name)) between 2 and 120),
  country text not null check(length(trim(country)) between 2 and 80),
  languages text[] not null check(cardinality(languages) between 1 and 12),
- phone text not null check(phone ~ '^\\+[1-9][0-9]{5,14}$'),
+ phone text not null check(phone ~ '^[+][1-9][0-9]{5,14}$'),
  status text not null default 'submitted' check(status in ('submitted','approved','rejected')),
  submitted_at timestamptz not null default now(),
  updated_at timestamptz not null default now()
@@ -13,6 +13,7 @@ create table if not exists public.david_operator_applications (
 alter table public.david_operator_applications enable row level security;
 revoke all on public.david_operator_applications from public, anon, authenticated;
 grant select on public.david_operator_applications to authenticated;
+drop policy if exists david_operator_applications_self_admin_read on public.david_operator_applications;
 create policy david_operator_applications_self_admin_read on public.david_operator_applications
  for select to authenticated using(user_id=(select auth.uid()) or david_internal.david_is_admin());
 
@@ -34,7 +35,7 @@ begin
  select array_agg(distinct trim(x)) into v_languages
  from unnest(coalesce(p_languages,array[]::text[])) x where length(trim(x)) between 2 and 40;
  if length(v_name) not between 2 and 120 or length(v_country) not between 2 and 80
- or v_phone !~ '^\\+[1-9][0-9]{5,14}$'
+ or v_phone !~ '^[+][1-9][0-9]{5,14}$'
  or coalesce(cardinality(v_languages),0) not between 1 and 12
  or exists(select 1 from unnest(coalesce(p_languages,array[]::text[])) x
     where trim(x)='' or length(trim(x))>40)
