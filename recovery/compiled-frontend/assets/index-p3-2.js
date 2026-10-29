@@ -101,7 +101,7 @@ async function davidTaskPage(){
    '<p class="muted" id="davidTasksStatus" role="status" aria-live="polite">Очаквам потвърждение от DAVID DPP…</p>';
   const issue=N("davidTasksIssue"),copy=N("davidTasksCopy"),continueBtn=N("davidTasksContinue"),
    codeBox=N("davidTasksCode"),status=N("davidTasksStatus");
-  let code=null,expiresAt=0,alive=true,checking=false;
+  let code=null,expiresAt=0,alive=true,checking=false,lastIssuedAt=0,lastPortalAttempt=0;
   const update=msg=>{if(alive&&status.isConnected)status.textContent=msg};
   issue.onclick=async()=>{
    issue.disabled=true;copy.disabled=true;code=null;codeBox.textContent="";codeBox.style.display="none";
@@ -111,7 +111,7 @@ async function davidTaskPage(){
     if(error)throw error;
     if(!data?.code||!data?.expires_at)throw Error("Невалиден отговор от сървъра.");
     if(!alive)return;
-    code=data.code;expiresAt=Date.parse(data.expires_at);
+    code=data.code;expiresAt=Date.parse(data.expires_at);lastIssuedAt=Date.now();
     codeBox.textContent=code;codeBox.style.display="block";copy.disabled=false;
     update("Кодът е готов. Въведи го в DAVID DPP, след което се върни на „ЗАДАЧИ“.");
    }catch(error){update("Неуспешно генериране: "+(error?.message||String(error)))}
@@ -130,8 +130,43 @@ async function davidTaskPage(){
     if(!alive||g.view!=="tasks")return;
     if(data?.ok===true){update("✅ Успешно свързване. Зареждам задачите…");davidTaskPage();return}
    }catch(error){
-    if(error?.code==="verified_operator_code_required")update("Още няма потвърдена операторска сесия. Въведи кода в DAVID DPP и опитай пак.");
-    else update("Проверката не успя: "+String(error?.message||error));
+    if(error?.code!=="verified_operator_code_required"){
+     update("Проверката не успя: "+String(error?.message||error));
+    }else{
+     try{
+      // The DAVID OS bridge consumes the visible code. A separate
+      // short-lived operator session must therefore be activated only
+      // after an active DAVID OS worker link is confirmed via RLS.
+      const {data:identity,error:identityError}=await g.db.from("david_worker_identities")
+       .select("worker_id,active").eq("user_id",g.user.id).maybeSingle();
+      if(identityError)throw identityError;
+      if(!identity?.active){update("Служебният операторски профил не е активен.");return}
+      const {data:links,error:linkError}=await g.db.from("david_worker_links")
+       .select("id").eq("worker_id",identity.worker_id).is("revoked_at",null).limit(1);
+      if(linkError)throw linkError;
+      if(!links?.length){update("Въведи първия код в DAVID DPP. След потвърждението задачите ще се появят автоматично.");return}
+      if(code){code=null;copy.disabled=true;codeBox.textContent="";codeBox.style.display="none"}
+      if(Date.now()-lastIssuedAt<47000){
+       update("✅ DAVID OS е свързан. Изчаквам защитния интервал за активиране на операторската сесия…");return;
+      }
+      if(Date.now()-lastPortalAttempt<50000){
+       update("✅ DAVID OS е свързан. Подготвям операторската сесия. Изчакай кратко…");return;
+      }
+      lastPortalAttempt=Date.now();
+      update("✅ DAVID OS е свързан. Активирам 4-часова операторска сесия…");
+      // Both RPCs run under the signed-in worker's own Google JWT.
+      // No service-role key or permanent code is exposed to the browser.
+      const {data:issued,error:issueError}=await g.db.rpc("david_generate_link_code");
+      if(issueError)throw issueError;
+      if(!issued?.code)throw Error("Не може да се подготви вътрешната сесия.");
+      const {data:activated,error:activateError}=await g.db.rpc("david_operator_portal_activate",{p_code:issued.code});
+      if(activateError)throw activateError;
+      if(activated?.ok!==true)throw Error("Потвърждението на операторската сесия е отказано.");
+      if(!alive||g.view!=="tasks")return;
+      const done=await request("list");
+      if(done?.ok===true){update("✅ Свързано. Зареждам задачите…");davidTaskPage()}
+     }catch(linkError){update("DAVID OS е свързан, но операторската сесия още не е активна: "+String(linkError?.message||linkError)+". Опитай отново след малко.")}
+    }
    }finally{checking=false;if(alive&&continueBtn.isConnected)continueBtn.disabled=false}
   }
   const focus=()=>verify(),visible=()=>{if(!document.hidden)verify()};
