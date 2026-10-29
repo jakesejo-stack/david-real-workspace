@@ -1,0 +1,164 @@
+<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SoulFlame DPP Admin · Workers</title><meta name="robots" content="noindex,nofollow"><style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,Segoe UI,sans-serif}*{box-sizing:border-box}body{background:#101113;color:#f1ece3;margin:0}
+main{width:min(1130px,calc(100% - 28px));margin:35px auto}h1{font-size:clamp(29px,5vw,49px);margin:5px 0 12px}h2{font-size:21px;margin:10px 0 16px}
+label{display:block;font-size:12px;color:#d5b888;margin-bottom:6px}input,select,textarea{width:100%;padding:11px;border-radius:9px;border:1px solid #57514c;background:#181b20;color:#fff;font:inherit}textarea{min-height:90px}
+button{background:#d6a452;color:#17130e;border:0;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer}button:disabled{opacity:.5}.secondary{background:#39322b;color:#f7dec0}
+section{border:1px solid #4b3926;background:#1b1b1b;border-radius:17px;padding:20px;margin:16px 0}p,.muted{color:#b4aaa0}.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;align-items:end}
+.panel-list{display:grid;gap:11px}.item{padding:14px;border-radius:12px;border:1px solid #494039;background:#141618}.line{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.tag{font-size:12px;color:#d4b684}
+.meta{font-size:12px;color:#baa99a}.short{max-width:230px}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#status{min-height:25px;color:#e9bd78}a{color:#d6a452}.hidden{display:none}
+@media(max-width:760px){.split{grid-template-columns:1fr}section{padding:13px}}
+</style></head>
+<body><main>
+<a href="/">← Операторски портал</a> · <a href="/admin-dashboard.html">◧ Admin Command Center / Аналитика</a>
+<h1>DAVID DPP · Admin</h1>
+<p>Workers, Companies и реалните CRM резултати. Достъп само за активни администратори.</p>
+<div class="line"><span id="who"></span><button id="google" type="button" class="secondary">Избери Google акаунт</button><button id="signout" type="button" class="secondary">Изход</button></div>
+<p id="status" role="status" aria-live="polite">Проверка на права…</p>
+<div id="content" hidden>
+<section>
+<h2>Покани оператор с Google</h2>
+<form id="inviteform" class="form">
+<div><label>Google имейл <input name="email" type="email" required placeholder="operator@company.com"></label></div>
+<div><label>Име <input name="name" maxlength="150" required placeholder="Име на оператор"></label></div>
+<button type="submit">Създай pending покана</button>
+</form>
+<p class="meta">Google входът сам по себе си не одобрява оператора. Одобрение и блокиране стават с администраторско действие.</p>
+</section>
+<div class="split">
+<section><h2>Работници и покани</h2><div id="workers" class="panel-list"></div></section>
+<section><h2>Фирми и назначения</h2><div id="companies" class="panel-list"></div></section>
+</div>
+<section><h2>История на реалните контакти</h2><div id="results" class="panel-list"></div></section>
+<div class="line"><button id="refresh" type="button">Обнови данните</button><span class="meta">Няма фиктивни Twilio CallSid или телефонни записи.</span></div>
+</div></main>
+<script type="module">
+import {createClient} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/+esm';
+const db=createClient('https://lyyqfpbrgjsxdqukwurl.supabase.co',"sb_publishable_vmL558NJwhKaYbnDzvQ0rA_EXl_c9K_",{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const $=id=>document.getElementById(id);
+const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e};
+let me=null;
+const setStatus=(s)=>{$('status').textContent=s};
+async function load(){
+ const {data:{user}}=await db.auth.getUser();me=user;
+ $('who').textContent=user?.email||'Няма Google вход';
+ $('content').hidden=true;
+ if(!user){setStatus('Влез с одобрения Google акаунт.');return}
+ const [member,identity]=await Promise.all([
+ db.from('david_members').select('role').eq('user_id',user.id).maybeSingle(),
+ db.from('david_worker_identities').select('active').eq('user_id',user.id).maybeSingle()
+ ]);
+ if(member.error||identity.error||member.data?.role!=='admin'||identity.data?.active!==true){
+   setStatus('Нямаш активни администраторски права за този акаунт.');return
+ }
+ $('content').hidden=false;setStatus('Администраторските права са потвърдени.');
+ await refresh();
+}
+async function refresh(){
+ const [inv,mem,ids,companies,results]=await Promise.all([
+  db.from('david_worker_invites').select('id,email,display_name,status,linked_user_id,invited_at').order('invited_at',{ascending:false}),
+  db.from('david_members').select('user_id,display_name,role'),
+  db.from('david_worker_identities').select('user_id,worker_id,active'),
+  db.from('david_companies').select('id,company_name,country,city,sector,assigned_to,calling_approved,do_not_call,contact_phone,contact_source').order('company_name'),
+  db.from('david_manual_contact_results').select('id,company_id,worker_user_id,channel,outcome,notes,followup_at,created_at').order('created_at',{ascending:false}).limit(30)
+ ]);
+ const errors=[inv,mem,ids,companies,results].filter(x=>x.error).map(x=>x.error.message);
+ if(errors.length){setStatus('Четене: '+errors.join(' | '));return}
+ const membership=new Map((mem.data||[]).map(m=>[m.user_id,m]));
+ const active=new Map((ids.data||[]).map(i=>[i.user_id,i.active]));
+ const approvedWorkers=(mem.data||[]).filter(m=>m.role==='worker'&&active.get(m.user_id));
+ const workerNames=new Map((inv.data||[]).filter(i=>i.linked_user_id).map(i=>[i.linked_user_id,i.email]));
+ const wbox=$('workers');wbox.replaceChildren();
+ if(!(inv.data||[]).length)wbox.append(el('p','Няма покани.'));
+ for(const i of (inv.data||[])){
+ const node=el('article',null,'item');
+ node.append(el('strong',i.display_name||i.email),el('p',i.email+' · '+i.status,'meta'));
+ const state=i.linked_user_id?(active.get(i.linked_user_id)?'АКТИВЕН':'БЛОКИРАН'):'ОЧАКВА GOOGLE ВХОД';
+ node.append(el('div',state,'tag'));
+ const actions=el('div',null,'line');
+ if(i.status==='pending'){
+   const btn=el('button','Одобри Google оператор');btn.type='button';
+   btn.addEventListener('click',async ()=>{
+     btn.disabled=true;const {data,error}=await db.rpc('david_admin_approve_worker_invite',{p_invite_id:i.id});
+     btn.disabled=false;setStatus(error?'Одобрение: '+error.message:'Одобрено.');if(!error)await refresh()
+   });actions.append(btn);
+ }
+ if(i.linked_user_id&&membership.get(i.linked_user_id)?.role==='worker'){
+   const isActive=active.get(i.linked_user_id)===true;
+   const btn=el('button',isActive?'Блокирай':'Активирай',isActive?'secondary':undefined);btn.type='button';
+   btn.addEventListener('click',async()=>{
+     if(!window.confirm('Потвърждаваш ли '+(isActive?'блокиране':'активиране')+' на '+i.email+'?'))return;
+     btn.disabled=true;const {error}=await db.rpc('david_admin_set_worker_active',{p_user_id:i.linked_user_id,p_active:!isActive});
+     btn.disabled=false;setStatus(error?error.message:'Промяната е записана.');if(!error)await refresh()
+   });actions.append(btn);
+ }
+ node.append(actions);wbox.append(node);
+ }
+ const cbox=$('companies');cbox.replaceChildren();
+ const cNames=new Map((companies.data||[]).map(c=>[c.id,c.company_name]));
+ if(!(companies.data||[]).length)cbox.append(el('p','Няма фирми.'));
+ for(const c of (companies.data||[])){
+   const node=el('article',null,'item');node.append(el('strong',c.company_name),el('p',(c.country||'')+' · '+(c.sector||''),'meta'));
+   const assign=el('select');assign.setAttribute('aria-label','Назначи оператор');
+   assign.append(new Option('Без оператор',''));
+   approvedWorkers.forEach(w=>assign.append(new Option(workerNames.get(w.user_id)||w.display_name||w.user_id,w.user_id)));
+   if(c.assigned_to && !approvedWorkers.some(w=>w.user_id===c.assigned_to)){
+     const current=membership.get(c.assigned_to);
+     assign.append(new Option('Текущо назначение: '+(current?.display_name||'неактивен/друг администратор'),c.assigned_to));
+   }
+   assign.value=c.assigned_to||'';
+   const assignBtn=el('button','Запази назначението','secondary');assignBtn.type='button';
+   assignBtn.addEventListener('click',async()=>{
+     assignBtn.disabled=true;
+     const {error}=await db.rpc('david_admin_assign_company',{p_company_id:c.id,p_worker_user_id:assign.value||null});
+     assignBtn.disabled=false;setStatus(error?'Назначение: '+error.message:'Назначението е записано.');
+     if(!error)await refresh()
+   });
+   const action=el('div',null,'line');action.append(assign,assignBtn);node.append(action);
+   const contactForm=el('form',null,'form');
+   const city=el('input');city.value=c.city||'';city.placeholder='Град';city.maxLength=100;city.setAttribute('aria-label','Град');
+   const phone=el('input');phone.value=c.contact_phone||'';phone.placeholder='+359...';phone.setAttribute('aria-label','Публичен служебен телефон');
+   const source=el('input');source.value=c.contact_source||'';source.placeholder='Публичен URL/източник';source.setAttribute('aria-label','Документиран източник');source.maxLength=1000;
+   const approve=el('input');approve.type='checkbox';approve.checked=!!c.calling_approved;approve.style.width='auto';
+   const chk=el('label',null);chk.append(approve,document.createTextNode(' Одобрявам ръчен B2B контакт след правна проверка'));
+   if(c.do_not_call){approve.disabled=true;approve.checked=false;chk.append(el('span',' · DO NOT CALL'))}
+   const submit=el('button','Запази контакт');submit.type='submit';
+   contactForm.append(city,phone,source,chk,submit);
+   contactForm.addEventListener('submit',async e=>{
+    e.preventDefault();
+    if(approve.checked&&!window.confirm('Потвърждаваш публичния бизнес телефон, източника и правното основание за ръчен контакт?'))return;
+    submit.disabled=true;
+    const {error}=await db.rpc('david_admin_update_business_contact',{
+     p_company_id:c.id,p_city:city.value,p_business_phone:phone.value,p_phone_source:source.value,
+     p_approve_manual_contact:approve.checked,p_verified_by_admin:approve.checked
+    });submit.disabled=false;
+    setStatus(error?'Контакт: '+error.message:'Фирменият контакт е записан.');
+    if(!error)await refresh();
+   });
+   node.append(contactForm);cbox.append(node);
+ }
+ const rbox=$('results');rbox.replaceChildren();
+ if(!(results.data||[]).length)rbox.append(el('p','Няма отчетени ръчни контакти. Това е реален празен регистър.'));
+ for(const r of (results.data||[])){
+  const node=el('article',null,'item');
+  node.append(el('strong',(cNames.get(r.company_id)||'Фирма')+' · '+r.outcome));
+  node.append(el('p',(workerNames.get(r.worker_user_id)||r.worker_user_id)+' · '+new Date(r.created_at).toLocaleString('bg-BG'),'meta'));
+  if(r.notes)node.append(el('p',r.notes));
+  if(r.followup_at)node.append(el('div','Следващ контакт: '+new Date(r.followup_at).toLocaleString('bg-BG'),'tag'));
+  rbox.append(node);
+ }
+}
+$('inviteform').addEventListener('submit',async e=>{
+ e.preventDefault();const f=e.currentTarget;
+ const email=f.elements.namedItem('email').value.trim().toLowerCase();
+ const name=f.elements.namedItem('name').value.trim();
+ const submit=f.querySelector('button[type="submit"]');submit.disabled=true;
+ const {error}=await db.rpc('david_admin_invite_worker',{p_email:email,p_name:name});
+ submit.disabled=false;setStatus(error?'Покана: '+error.message:'Поканата е записана в CRM. Не е изпратен автоматичен имейл.');
+ if(!error){f.reset();await refresh()}
+});
+$('refresh').addEventListener('click',refresh);
+$('google').addEventListener('click',async()=>{const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});if(error)setStatus(error.message)});
+$('signout').addEventListener('click',async()=>{await db.auth.signOut();await load()});
+await load();
+</script></body></html>
