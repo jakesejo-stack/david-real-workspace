@@ -262,8 +262,8 @@ async function davidPendingAdminPanel(){
    list.innerHTML=pending.map(r=>
     '<div class="row" style="padding:10px 0;gap:12px;flex-wrap:wrap;border-bottom:1px solid #ddd">'+
     '<div><b>'+I(r.name||r.email||"Google потребител")+'</b><p class="tiny">'+I(r.email||"")+'</p></div>'+
-    ''<label class="tiny">Категория <select class="field" data-google-kind="'+I(r.user_id)+'"><option value="operator">Оператор</option><option value="test">Тест</option><option value="test2">Тест 2</option></select></label>'+
-    <button class="btn green" type="button" data-google-approve="'+I(r.user_id)+'">✓ Одобри оператор</button>'+
+    '<label class="tiny">Категория <select class="field" data-google-kind="'+I(r.user_id)+'"><option value="operator">Оператор</option><option value="test">Тест</option><option value="test2">Тест 2</option></select></label>'+
+    '<button class="btn green" type="button" data-google-approve="'+I(r.user_id)+'">✓ Одобри оператор</button>'+
     '<button class="btn red" type="button" data-google-deny="'+I(r.user_id)+'">✕ Откажи</button></div>'
    ).join('');
    for(const btn of list.querySelectorAll("[data-google-approve],[data-google-deny]")){
