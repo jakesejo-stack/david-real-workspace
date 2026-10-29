@@ -22,7 +22,16 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
   const tasksBox=create('div','dpp-center-list');
   const hint=create('small','dpp-center-sync','Синхронизация на 10 секунди');
   const title=create('h2','',admin?'Задачи на екипа':'Моите нови задачи');
-  head.append(title,hint);content.append(head,tasksBox);
+  // This uses the existing authenticated DAVID navigation. It never places a call.
+  const openLiveDesk=()=>{
+    const entry=document.querySelector('button[data-nav="desk"]');
+    if(!entry){hint.textContent='Live Call Desk временно не е достъпен.';return;}
+    entry.click();
+  };
+  const deskShortcut=create('button','dpp-center-call-shortcut','☎ Live Call Desk');
+  deskShortcut.type='button';
+  deskShortcut.addEventListener('click',openLiveDesk);
+  head.append(title,deskShortcut,hint);content.append(head,tasksBox);
   nav.append(brand,taskButton,firmsButton);
   const body=create('main','dpp-center-body');body.append(content);
   shell.append(nav,body);root.replaceChildren(shell);
@@ -64,6 +73,13 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
         status.value=item.status||'TODO';
         status.addEventListener('change',()=>makeAction(()=>api.updateStatus(item.id,status.value)));
         controls.append(status);
+        if(item.status!=='DONE'){
+          const callButton=create('button','dpp-center-task-call','☎ Към разговор');
+          callButton.type='button';
+          callButton.setAttribute('aria-label','Отвори Live Call Desk за задача '+(item.title||''));
+          callButton.addEventListener('click',openLiveDesk);
+          controls.append(callButton);
+        }
         const notes=create('div','dpp-center-notes');
         for(const note of Array.isArray(item.notes)?item.notes:[]){
           notes.append(create('p','',note.message||''));
