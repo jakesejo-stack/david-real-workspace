@@ -68,3 +68,47 @@ begin
 end $$;
 revoke all on function public.david_worker_my_tasks() from public,anon;
 grant execute on function public.david_worker_my_tasks() to authenticated;
+
+create or replace function public.david_worker_save_task_interaction(
+ p_task_id uuid,p_outcome text,p_notes text default '',
+ p_followup_at timestamptz default null,p_contact_confirmed boolean default false)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_uid uuid:=auth.uid();v_task public.david_admin_tasks%rowtype;
+ v_company public.david_companies%rowtype;v_id uuid;
+begin
+ if not david_internal.david_is_active_member()
+ or not exists(select 1 from public.david_members m where m.user_id=v_uid and m.role='worker')
+ then raise exception 'Active worker required' using errcode='42501';end if;
+ if p_outcome not in ('no_answer','callback','followup','interested','declined',
+ 'contacted','do_not_contact','note') or length(coalesce(p_notes,''))>2000
+ or (p_followup_at is not null and (p_followup_at<=now()
+ or p_followup_at>now()+interval '365 days'))
+ or (p_outcome in ('callback','followup') and p_followup_at is null)
+ or (p_outcome<>'note' and p_contact_confirmed is distinct from true)
+ then raise exception 'Invalid contact result' using errcode='22023';end if;
+ select * into v_task from public.david_admin_tasks where id=p_task_id for update;
+ if not found or v_task.assigned_to is distinct from v_uid or v_task.company_id is null
+ then raise exception 'Task not owned by operator' using errcode='42501';end if;
+ select * into v_company from public.david_companies where id=v_task.company_id for update;
+ if not found or v_company.assigned_to is distinct from v_uid then
+ raise exception 'Company is not assigned to operator' using errcode='42501';end if;
+ if p_outcome<>'note' and (v_company.do_not_call or not v_company.calling_approved
+ or v_company.contact_phone !~ '^[+][1-9][0-9]{5,14}$'
+ or length(trim(v_company.contact_source))<5) then
+ raise exception 'Manual phone contact must be approved' using errcode='42501';end if;
+ insert into public.david_company_interactions(task_id,company_id,worker_user_id,outcome,notes,followup_at)
+ values(p_task_id,v_company.id,v_uid,p_outcome,coalesce(p_notes,''),p_followup_at)
+ returning id into v_id;
+ if p_outcome='do_not_contact' then
+ update public.david_companies set do_not_call=true,calling_approved=false,updated_at=now()
+ where id=v_company.id;end if;
+ update public.david_admin_tasks set status='IN_PROGRESS',updated_at=now(),updated_by=v_uid
+ where id=p_task_id and status='TODO';
+ insert into public.david_audit_events(actor_id,action,company_id,details)
+ values(v_uid,'worker_task_contact_saved',v_company.id,
+ jsonb_build_object('task_id',p_task_id,'interaction_id',v_id,'outcome',p_outcome));
+ return jsonb_build_object('ok',true,'interaction_id',v_id,'company_id',v_company.id,
+ 'source','operator_self_reported');
+end $$;
+revoke all on function public.david_worker_save_task_interaction(uuid,text,text,timestamptz,boolean) from public,anon;
+grant execute on function public.david_worker_save_task_interaction(uuid,text,text,timestamptz,boolean) to authenticated;
