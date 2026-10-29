@@ -1,0 +1,21 @@
+name: Operator CRM checks
+on:
+  pull_request:
+    paths:
+      - 'src/*.mjs'
+      - 'tests/*.mjs'
+      - '.github/workflows/operator-crm-check.yml'
+  push:
+    branches:
+      - 'feature/operator-profile-company-history-20261029'
+jobs:
+  node-contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check src/admin-worker-picker.mjs
+      - run: node --check src/operator-company-workflows.mjs
+      - run: node --test tests/admin-worker-picker.test.mjs tests/operator-company-workflows.test.mjs
