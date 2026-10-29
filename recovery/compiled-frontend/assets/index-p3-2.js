@@ -249,25 +249,21 @@ function davidManualDesk(){
  '<div class="fields"><div><small>Компания</small><strong>Без избрана фирма</strong></div><div><small>Държава</small><strong>Не е необходима</strong></div><div><small>Контакт</small><strong>Номер по задача или ръчно</strong></div>'+
  '<label><small>Телефон</small><input id="deskManualNumber" class="field" type="tel" inputmode="tel" maxlength="20" placeholder="0878321708 или +359878321708" autocomplete="off"></label></div>'+
  '<div class="notice"><b>Работна задача:</b> <span id="deskTaskLabel">Зареждам…</span></div>'+
- '<p class="tiny">Номерът се въвежда тук, в самия Call Desk. Не е нужна фирмена резервация.</p></div>'+
- '<div class="card"><h2>Статус на разговора</h2><p id="voiceState" class="tag orange">Ръчен режим · външен телефон</p>'+
- '<p class="muted">Twilio '+(g.config?.telephonyConfigured?"може да е наличен само за одобрени фирмени разговори.":"не е настроен. Отварянето на номера не създава Twilio разговор.")+'</p>'+
- '<p class="tiny">Запис на звук: изключен. Free Call не създава фиктивна история.</p></div></div>'+
- '<div class="card"><h2>Резултат след реален контакт</h2><p class="muted">За автоматичен отчет е нужен реален потвърден Twilio разговор. Ръчният разговор през телефонното приложение не се записва автоматично в DAVID.</p>'+
+ '<p class="tiny">Twilio набира само номера от одобрената дневна задача. Няма нужда от фирмена резервация. Работи с микрофона на браузъра.</p></div>'+
+ '<div class="card"><h2>Статус на разговора</h2><p id="voiceState" class="tag orange">'+I(g.callStatus||(g.config?.telephonyConfigured?'Twilio · готовност':'Twilio не е настроен'))+'</p>'+
+ '<p class="muted">Twilio '+(g.config?.telephonyConfigured?"използва микрофона на браузъра и валиден номер по задача.":"няма пълна конфигурация. Разговорите остават изключени, докато администраторът не добави всички настройки.")+'</p>'+
+ '<p class="tiny">Запис на звук: изключен. Резултати се отчитат само при реални Twilio събития.</p></div></div>'+
+ '<div class="card"><h2>Резултат след реален контакт</h2><p class="muted">Реалният разговор се осъществява през Twilio Voice SDK. При липса на потвърден Twilio callback не се маркира проведен контакт.</p>'+
  '<select class="field" disabled><option>Pending / Очакващ отговор</option></select>'+
  '<textarea class="field" rows="3" disabled placeholder="Бележки след потвърден Twilio разговор"></textarea>'+
  '<button class="btn primary" disabled>Запази резултата</button></div>'+
  '<div class="card" id="deskWorkerTask"><h2>📋 Задача за днес</h2><p class="muted">Зареждане…</p></div>'+
  '<div class="dock"><div><b>☎ Live Call Desk · Free Call</b><div class="tiny" id="deskDialHint">Въведи номер за набиране</div></div>'+
- '<div class="buttons"><button id="deskCallStart" class="btn green" type="button">☎ Start Call</button><button class="btn red" disabled title="Управлява се от телефонното приложение">■ End Call</button></div></div>'+
- '<p class="tiny">Free Call означава свободно въвеждане на номер, не безплатен разговор. Обаждането ползва тарифата на телефона. Спазвай разрешенията за контакт.</p>';
+ '<div class="buttons"><button id="deskCallStart" class="btn green" type="button" '+(g.call||g.taskCallBusy?'disabled':'')+'>☎ Start Call</button><button id="deskCallEnd" class="btn red" type="button" '+(g.call?'':'disabled')+'>■ End Call</button></div></div>'+
+ '<p class="tiny">Free Call означава разговор без фирмена резервация, не безплатен разговор. Twilio начислява такси след активиране. Обаждането е ограничено до одобрения номер по днешната задача.</p>';
  N("deskModeCompany").onclick=()=>{if(hasCompany){g.freeDeskMode=false;ct()}else{g.freeDeskMode=false;g.view="companies";ct()}};
- N("deskCallStart").onclick=()=>{
-  const phone=davidFreePhoneNumber(N("deskManualNumber").value);
-  if(!phone){re("Въведи валиден номер, например 0878321708.");return}
-  if(!confirm("Отвори телефонното приложение за "+phone+"? Операторът може да начисли такса. Това не е Twilio разговор."))return;
-  location.href="tel:"+phone;
- };
+ N("deskCallStart").onclick=()=>davidStartTaskTwilio();
+ N("deskCallEnd").onclick=()=>{if(g.call)g.call.disconnect()};
  davidLoadDeskTask().then(()=>{
   const input=N("deskManualNumber");
   if(!input||input.value)return;
@@ -275,6 +271,39 @@ function davidManualDesk(){
   const match=task.match(/\+359\d{9}|(?<!\d)0\d{9}(?!\d)/);
   if(match)input.value=match[0];
  });
+}
+
+
+async function davidStartTaskTwilio(){
+ if(g.taskCallBusy||g.call)return;
+ if(!g.config?.telephonyConfigured)return re("Twilio не е настроен. Администраторът трябва да добави ключовете и TwiML App във Vercel.");
+ const requested=davidFreePhoneNumber(N("deskManualNumber")?.value);
+ const task=(g.davidDailyTask?.instructions||"")+" "+(g.davidDailyTask?.title||"");
+ const found=task.match(/\+359\d{9}|(?<!\d)0\d{9}(?!\d)/);
+ const expected=davidFreePhoneNumber(found?.[0]);
+ if(!requested||!expected||requested!==expected)return re("Номерът трябва да съвпада с назначения от Admin номер за днешната задача.");
+ if(!confirm("Да звъннем през Twilio от браузъра на "+requested+"? Разговорът може да се таксува."))return;
+ try{
+  g.taskCallBusy=true;g.callStatus="Проверявам достъпа до Twilio…";davidManualDesk();
+  const auth=await hu("/api/integrations/david/task-token",{method:"POST"});
+  if(!auth?.token||auth.dialTo!==requested)throw Error("Номерът не е разрешен за Twilio разговор.");
+  const device=new E(auth.token,{logLevel:"warn"});
+  g.device=device;
+  device.on("error",err=>{g.callStatus="Twilio: "+err.message;re(g.callStatus)});
+  g.callStatus="Свързване с Twilio…";
+  const call=await device.connect({params:{To:auth.dialTo}});
+  g.call=call;g.callStatus="Набиране през Twilio…";davidManualDesk();
+  call.on("ringing",()=>{g.callStatus="Звъни през Twilio…";davidManualDesk()});
+  call.on("accept",()=>{g.callStatus="Активен Twilio разговор";davidManualDesk()});
+  const cleanup=()=>{if(g.call!==call)return;g.call=null;g.callStatus="Twilio разговорът приключи";g.device?.destroy();g.device=null;davidManualDesk()};
+  call.on("disconnect",cleanup);call.on("cancel",cleanup);call.on("reject",cleanup);
+  call.on("error",err=>{re("Twilio: "+err.message);cleanup()});
+ }catch(err){
+  g.callStatus="Twilio не можа да стартира";
+  re(String(err?.message||err));
+  if(g.device){g.device.destroy();g.device=null}
+  g.call=null;
+ }finally{g.taskCallBusy=false;davidManualDesk()}
 }
 async function davidLoadDeskTask(){
  const node=N("deskWorkerTask");
