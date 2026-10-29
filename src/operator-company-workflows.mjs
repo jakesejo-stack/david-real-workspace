@@ -280,13 +280,16 @@ export async function mountAdminActivity(container,db) {
    db.from('david_companies').select('id,company_name,country,assigned_to').limit(5000),
    db.from('david_company_interactions').select('id,company_id,worker_user_id,outcome,notes,created_at,source,followup_at').order('created_at',{ascending:false}).limit(2000)
   ]);
-  for(const x of [members,companies,interactions])if(x.error)throw x.error;
+  // A missing/new interaction table must not blank the worker/company roster.
+  for(const x of [members,companies])if(x.error)throw x.error;
+  const historyUnavailable=!!interactions.error;
   const people=new Map((members.data||[]).map(x=>[x.user_id,x]));
   const firms=new Map((companies.data||[]).map(x=>[x.id,x]));
   entries=(interactions.data||[]).map(x=>({ ...x,worker:people.get(x.worker_user_id),company:firms.get(x.company_id)}));
   status.textContent='Оператори: '+(members.data||[]).filter(x=>x.role==='worker').length+
    ' · Фирми: '+firms.size+' · Записани операторски отчети: '+entries.length+
-   ' (не са аудиозаписи или автоматична транскрипция).';
+   ' (не са аудиозаписи или автоматична транскрипция).'+
+   (historyUnavailable?' · Историята изисква миграция 017.':'')+'';
   const roster=el(d,'section');roster.className='card';container.insertBefore(roster,result);
   roster.append(el(d,'h3','Всички оператори'));
   for(const p of (members.data||[]).filter(x=>x.role==='worker')){
