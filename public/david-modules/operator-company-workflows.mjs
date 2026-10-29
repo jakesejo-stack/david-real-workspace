@@ -287,6 +287,19 @@ export async function mountAdminActivity(container,db) {
   status.textContent='Оператори: '+(members.data||[]).filter(x=>x.role==='worker').length+
    ' · Фирми: '+firms.size+' · Записани операторски отчети: '+entries.length+
    ' (не са аудиозаписи или автоматична транскрипция).';
+  const roster=el(d,'section');roster.className='card';container.insertBefore(roster,result);
+  roster.append(el(d,'h3','Всички оператори'));
+  for(const p of (members.data||[]).filter(x=>x.role==='worker')){
+   const assigned=(companies.data||[]).filter(c=>c.assigned_to===p.user_id).length;
+   const worked=entries.filter(e=>e.worker_user_id===p.user_id).length;
+   roster.append(el(d,'p',(p.display_name||p.user_id)+' · Назначени фирми: '+assigned+' · Отчети: '+worked));
+  }
+  roster.append(el(d,'h3','Всички фирми'));
+  for(const c of (companies.data||[])){
+   const owner=people.get(c.assigned_to);
+   roster.append(el(d,'p',(c.company_name||c.id)+' · '+(c.country||'')+
+    ' · Оператор: '+(owner?.display_name||'Неназначена')));
+  }
   const render=()=>{
    const q=search.input.value.trim().toLocaleLowerCase('bg-BG');
    const rows=entries.filter(x=>[x.worker?.display_name,x.company?.company_name,x.company?.country,x.notes,x.outcome]
