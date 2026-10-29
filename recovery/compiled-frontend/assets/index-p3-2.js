@@ -89,6 +89,13 @@ function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class=
   page.innerHTML='<h1>Admin Panel</h1><div class="card warning" role="alert"><h2>CRM данните не се заредиха</h2><p>'+reason+'</p><button class="btn" id="davidAdminRetry" type="button">↻ Опитай отново</button></div>';
   N("davidAdminRetry")?.addEventListener("click",()=>{if(g.view==="admin")ct()});
  }
+ Promise.resolve().then(async()=>{
+  if(g.role!=="admin"||g.view!=="admin")return;
+  const holder=document.createElement("section");holder.className="card";holder.id="davidAdminAllActivity";
+  N("content")?.append(holder);
+  const mod=await import("/david-modules/operator-company-workflows.mjs");
+  if(holder.isConnected&&g.role==="admin")await mod.mountAdminActivity(holder,g.db);
+ }).catch(err=>console.warn("[DAVID] Admin activity unavailable",err));
  return Promise.resolve().then(()=>davidPendingAdminPanel()).catch(err=>{
   console.error("[DAVID] Google approvals panel failed",err);
   if(g.view!=="admin")return;
