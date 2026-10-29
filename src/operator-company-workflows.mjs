@@ -209,3 +209,29 @@ export async function mountWorkerTasks(container,db,afterSave=()=>{}) {
   }
  }catch(err){showError(container,err)}
 }
+
+export async function mountMyCompanies(container,db) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Моите фирми / Company Info'));
+ const search=field(d,'Търси по фирма, държава или сектор','search');
+ const list=el(d,'section'),detail=el(d,'section');
+ container.append(search.box,list,detail);
+ let request=0;
+ async function run(){
+  const requestId=++request;
+  list.replaceChildren(el(d,'p','Зареждане...'));
+  try {
+   const rows=await myCompanies(db,search.input.value);
+   if(requestId!==request)return;
+   list.replaceChildren();
+   if(!rows.length)list.append(el(d,'p','Няма фирми в твоята история.'));
+   for(const c of rows){
+    const button=el(d,'button',c.company_name+' — '+c.country+
+     ' · Мои контакти: '+c.my_contact_count+
+     (c.last_outcome?' · '+(OUTCOMES[c.last_outcome]||c.last_outcome):''));
+    button.type='button';
+    button.addEventListener('click',()=>openDetail(c.company_id));
+    list.append(button);
+   }
+  }catch(err){list.replaceChildren();showError(list,err)}
+ }
