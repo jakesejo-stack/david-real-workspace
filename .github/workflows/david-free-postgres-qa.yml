@@ -53,4 +53,13 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f sql/017_david_company_activity.sql
           psql -X -v ON_ERROR_STOP=1 -f sql/018_david_my_companies.sql
       - name: Check identity and operator isolation rules
-        run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/free-postgres-check.sql
+        run: |
+          set +e
+          psql -X -a -v ON_ERROR_STOP=1 -f tests/sql/free-postgres-check.sql > /tmp/david-qa.log 2>&1
+          result=$?
+          cat /tmp/david-qa.log
+          echo "## SQL authorization test output" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~text' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 35 /tmp/david-qa.log >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
