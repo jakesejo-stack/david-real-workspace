@@ -22,3 +22,8 @@
 
 #dppTaskRoot .dpp-center-nav{display:none}
 #dppTaskRoot .dpp-center-shell{grid-template-columns:1fr}
+
+.dpp-center-call-shortcut,.dpp-center-task-call{background:#0b78d4;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}
+.dpp-center-call-shortcut:focus-visible,.dpp-center-task-call:focus-visible{outline:3px solid #79c6ff;outline-offset:2px}
+.dpp-center-call-shortcut:hover,.dpp-center-task-call:hover{background:#0864b1}
+.dpp-center-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
