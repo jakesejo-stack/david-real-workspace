@@ -7,3 +7,9 @@ Migrations: sql/016 operator application, sql/017 company tasks and manual outco
 The applicant provides name, country, languages and phone after Google login and before approval. Admin reviews the profile and assigns a company task by approved operator ID. Worker records a real, self-reported contact result and optional callback time. My Companies searches own current and past contacted companies, with own notes and follow-ups on click.
 
 Personal DAVID audio analysis and AI guidance are a future phase, not part of this change.
+
+## Borko review and release
+
+Restore full original Vite source before integration. Merge approved Gmail selector PR #9 first, then this stacked feature. Apply SQL 016–018 in staging, run unit and authenticated two-worker isolation tests. Verify pending applications, operator blocking, callback history, mobile UI and original phone handlers. Ask Borko's GPT for final complete audit, then use reversible Vercel preview. Deploy only if all acceptance checks pass. Send Borko the verified production link after deployment.
+
+No live database migrations or production deploy are part of this draft PR.
