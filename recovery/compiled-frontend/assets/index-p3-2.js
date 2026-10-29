@@ -257,11 +257,21 @@ function davidManualDesk(){
  '<select class="field" disabled><option>Pending / Очакващ отговор</option></select>'+
  '<textarea class="field" rows="3" disabled placeholder="Бележки след потвърден Twilio разговор"></textarea>'+
  '<button class="btn primary" disabled>Запази резултата</button></div>'+
+ '<div class="card" id="davidTestCard" style="border:2px dashed #7a9bd5"><div class="row"><h2>🧪 TEST · Репетиция на DPP обаждане</h2><span class="tag orange">SIMULATION · НЯМА РЕАЛЕН РАЗГОВОР</span></div>'+
+ '<p class="tiny"><b>Тестов код: DPP-TEST-1948</b> (демонстрационен, НЕ е код за вход или Twilio credential).</p>'+
+ '<p class="muted">Упражни обаждането и скрипта преди да активираме Twilio. Тук не се използва баланс, не се набира номер и нищо не се записва в Call Records.</p>'+
+ '<div class="fields"><div><small>Тестова задача / номер</small><strong id="davidTestTarget">Зареждам задачата…</strong></div><div><small>Симулация</small><strong id="davidTestStatus">'+I(({idle:"Готов за тест",ringing:"TEST · Звъни (симулация)",answered:"TEST · Свързано (симулация)",ended:"TEST · Приключен, без реален разговор"})[g.testStage||"idle"]||"TEST")+'</strong></div></div>'+
+ '<details open><summary><b>🎤 Тестов скрипт</b></summary><p id="davidTestScript" style="white-space:pre-wrap; margin-top:10px">Зареждам скрипта на Jake…</p></details>'+
+ '<div class="row" style="margin-top:14px;flex-wrap:wrap;gap:8px"><button class="btn green" id="davidTestStart" type="button" '+(["ringing","answered"].includes(g.testStage)?"disabled":"")+'>▶ Старт TEST</button><button class="btn primary" id="davidTestAnswer" type="button" '+(g.testStage==="ringing"?"":"disabled")+'>✓ Симулирай отговор</button><button class="btn red" id="davidTestEnd" type="button" '+(["ringing","answered"].includes(g.testStage)?"":"disabled")+'>■ Край TEST</button></div>'+
+ '<p class="tiny">Реалният бутон Start Call е отделен и остава блокиран до валидна Twilio конфигурация.</p></div>'+
  '<div class="card" id="deskWorkerTask"><h2>📋 Задача за днес</h2><p class="muted">Зареждане…</p></div>'+
  '<div class="dock"><div><b>☎ Live Call Desk · Free Call</b><div class="tiny" id="deskDialHint">Въведи номер за набиране</div></div>'+
  '<div class="buttons"><button id="deskCallStart" class="btn green" type="button" '+(g.call||g.taskCallBusy?'disabled':'')+'>☎ Start Call</button><button id="deskCallEnd" class="btn red" type="button" '+(g.call?'':'disabled')+'>■ End Call</button></div></div>'+
  '<p class="tiny">Free Call означава разговор без фирмена резервация, не безплатен разговор. Twilio начислява такси след активиране. Обаждането е ограничено до одобрения номер по днешната задача.</p>';
  N("deskModeCompany").onclick=()=>{if(hasCompany){g.freeDeskMode=false;ct()}else{g.freeDeskMode=false;g.view="companies";ct()}};
+ N("davidTestStart").onclick=()=>{g.testStage="ringing";davidManualDesk()};
+ N("davidTestAnswer").onclick=()=>{if(g.testStage==="ringing"){g.testStage="answered";davidManualDesk()}};
+ N("davidTestEnd").onclick=()=>{if(["ringing","answered"].includes(g.testStage)){g.testStage="ended";davidManualDesk()}};
  N("deskCallStart").onclick=()=>davidStartTaskTwilio();
  N("deskCallEnd").onclick=()=>{if(g.call)g.call.disconnect()};
  davidLoadDeskTask().then(()=>{
@@ -318,6 +328,10 @@ async function davidLoadDeskTask(){
   g.davidDailyTask=data||null;
   const taskLabel=N("deskTaskLabel");
   if(taskLabel)taskLabel.textContent=data?.title||"Няма дневна задача";
+  const testTarget=N("davidTestTarget");
+  if(testTarget)testTarget.textContent=(data?.title||"Няма задача за днес");
+  const testScript=N("davidTestScript");
+  if(testScript)testScript.textContent=data?.call_script||"Няма назначен скрипт. Администраторът може да зададе скрипт към дневната задача.";
   node.innerHTML=data
    ?'<h2>📋 Задача за днес</h2><h3>'+I(data.title)+'</h3><p>'+I(data.instructions||"")+'</p><details><summary>Скрипт за разговора</summary><div class="panel">'+I(data.call_script||"Няма скрипт")+'</div></details><p class="tiny">Цел: '+I(data.target_calls)+' обаждане. Реалният разговор се отчита само след Twilio потвърждение.</p>'
    :'<h2>📋 Задачи</h2><p class="muted">Няма назначена задача за днес.</p>';
