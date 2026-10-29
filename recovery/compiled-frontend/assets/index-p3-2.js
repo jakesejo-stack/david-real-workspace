@@ -72,7 +72,26 @@ function davidPendingGoogle(status){
   g.davidPendingCleanup=()=>clearInterval(timer);
  }
 }
-function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class="brand">◇ DAVID<i>.</i></div><p class="brand-sub">SOULFLAME SYSTEMS</p><h2>Вход в DPP Call Center</h2><p class="muted">Google вход за одобрени оператори и администратори.</p><button id="googleLogin" class="btn primary" style="width:100%">Продължи с Google</button><p class="tiny" style="margin-top:15px">Администраторските права се проверяват в Supabase, не от браузъра.</p></div>',N("googleLogin").onclick=async()=>{try{const{error:e}=await g.db.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+"/"}});if(e)throw e}catch(e){ye(e)}}}function nn(t=""){N("root").innerHTML='<div class="login card"><h2>DAVID: изчакваш активиране</h2><p class="muted">Входът с Google е успешен, но нямаш активна Worker или Admin роля. Администраторът може да активира акаунта ти.</p><p class="tiny">'+I(t)+'</p><button class="btn" id="logout">Изход</button></div>',N("logout").onclick=async()=>{await g.db.auth.signOut(),location.reload()}}function au(){const t=[["tasks","☷ ЗАДАЧИ"],["mycompanies","▤ Моите фирми"],["companies","▦ Company Info"],["desk","☎ Live Call Desk"],["records","▤ Call Records"],["general","ⓘ General Info"],["profile","✓ Google профил"],["support","🛠 Support Tickets"]];g.role==="admin"&&t.push(["admin","⚙ Admin Panel"]);const e=t.map(([s,i])=>'<button type="button" data-nav="'+s+'">'+I(i)+"</button>").join("");N("root").innerHTML='<div class="layout"><aside class="side"><div class="brand">◇ DAVID<i>.</i></div><div class="brand-sub">SOULFLAME SYSTEMS</div><div class="nav" id="sidenav">'+e+'</div></aside><div class="page"><div class="top"><span class="chip green">● DB CONNECTED</span><span class="chip '+(g.config.telephonyConfigured?"green":"amber")+'">'+(g.config.telephonyConfigured?"☎ TWILIO CONNECTED":"☎ TWILIO НЕ Е НАСТРОЕН")+'</span><span class="chip">'+I(g.user.email)+" · "+(g.role==="admin"?"Admin":"Worker")+'</span><button class="btn subtle" id="logout">Изход</button></div><main class="main" id="content"></main></div></div><nav class="mobile-nav" id="mobilenav">'+e+"</nav>",N("logout").onclick=async()=>{g.call&&g.call.disconnect(),await g.db.auth.signOut(),location.reload()},document.querySelectorAll("[data-nav]").forEach(s=>s.onclick=()=>{const i=s.dataset.nav;i==="admin"&&g.role!=="admin"||(g.view=i,ct())})}function ct(){if(g.view!=="tasks"&&g.davidTaskWaitCleanup){g.davidTaskWaitCleanup();g.davidTaskWaitCleanup=null}if(g.view!=="tasks"&&g.davidTaskUnmount){g.davidTaskUnmount();g.davidTaskUnmount=null}if(g.role){if(document.querySelectorAll("[data-nav]").forEach(t=>t.classList.toggle("active",t.dataset.nav===g.view)),g.view==="tasks")return davidTaskPage();if(g.view==="mycompanies")return davidMyCompaniesPage();if(g.view==="companies")return De();if(g.view==="desk")return Ue();if(g.view==="records")return pu();if(g.view==="general")return gu();if(g.view==="profile")return davidWorkerLinkPage();if(g.view==="support")return davidSupportInboxPage();if(g.view==="admin"&&g.role==="admin"){mu();return davidPendingAdminPanel()}}}
+function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class="brand">◇ DAVID<i>.</i></div><p class="brand-sub">SOULFLAME SYSTEMS</p><h2>Вход в DPP Call Center</h2><p class="muted">Google вход за одобрени оператори и администратори.</p><button id="googleLogin" class="btn primary" style="width:100%">Продължи с Google</button><p class="tiny" style="margin-top:15px">Администраторските права се проверяват в Supabase, не от браузъра.</p></div>',N("googleLogin").onclick=async()=>{try{const{error:e}=await g.db.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+"/"}});if(e)throw e}catch(e){ye(e)}}}function nn(t=""){N("root").innerHTML='<div class="login card"><h2>DAVID: изчакваш активиране</h2><p class="muted">Входът с Google е успешен, но нямаш активна Worker или Admin роля. Администраторът може да активира акаунта ти.</p><p class="tiny">'+I(t)+'</p><button class="btn" id="logout">Изход</button></div>',N("logout").onclick=async()=>{await g.db.auth.signOut(),location.reload()}}function au(){const t=[["tasks","☷ ЗАДАЧИ"],["mycompanies","▤ Моите фирми"],["companies","▦ Company Info"],["desk","☎ Live Call Desk"],["records","▤ Call Records"],["general","ⓘ General Info"],["profile","✓ Google профил"],["support","🛠 Support Tickets"]];g.role==="admin"&&t.push(["admin","⚙ Admin Panel"]);const e=t.map(([s,i])=>'<button type="button" data-nav="'+s+'">'+I(i)+"</button>").join("");N("root").innerHTML='<div class="layout"><aside class="side"><div class="brand">◇ DAVID<i>.</i></div><div class="brand-sub">SOULFLAME SYSTEMS</div><div class="nav" id="sidenav">'+e+'</div></aside><div class="page"><div class="top"><span class="chip green">● DB CONNECTED</span><span class="chip '+(g.config.telephonyConfigured?"green":"amber")+'">'+(g.config.telephonyConfigured?"☎ TWILIO CONNECTED":"☎ TWILIO НЕ Е НАСТРОЕН")+'</span><span class="chip">'+I(g.user.email)+" · "+(g.role==="admin"?"Admin":"Worker")+'</span><button class="btn subtle" id="logout">Изход</button></div><main class="main" id="content"></main></div></div><nav class="mobile-nav" id="mobilenav">'+e+"</nav>",N("logout").onclick=async()=>{g.call&&g.call.disconnect(),await g.db.auth.signOut(),location.reload()},document.querySelectorAll("[data-nav]").forEach(s=>s.onclick=()=>{const i=s.dataset.nav;i==="admin"&&g.role!=="admin"||(g.view=i,ct())})}function ct(){if(g.view!=="tasks"&&g.davidTaskWaitCleanup){g.davidTaskWaitCleanup();g.davidTaskWaitCleanup=null}if(g.view!=="tasks"&&g.davidTaskUnmount){g.davidTaskUnmount();g.davidTaskUnmount=null}if(g.role){if(document.querySelectorAll("[data-nav]").forEach(t=>t.classList.toggle("active",t.dataset.nav===g.view)),g.view==="tasks")return davidTaskPage();if(g.view==="mycompanies")return davidMyCompaniesPage();if(g.view==="companies")return De();if(g.view==="desk")return Ue();if(g.view==="records")return pu();if(g.view==="general")return gu();if(g.view==="profile")return davidWorkerLinkPage();if(g.view==="support")return davidSupportInboxPage();if(g.view==="admin"&&g.role==="admin"){
+ const page=N("content");if(!page)return;
+ page.innerHTML='<div class="card" role="status"><h1>Admin Panel</h1><p class="muted">Зареждам администраторския панел…</p></div>';
+ try{mu()}catch(err){
+  console.error("[DAVID] Admin CRM panel failed; Google approval remains independent",err);
+  const reason=I(String(err?.message||err));
+  page.innerHTML='<h1>Admin Panel</h1><div class="card warning" role="alert"><h2>CRM данните не се заредиха</h2><p>'+reason+'</p><button class="btn" id="davidAdminRetry" type="button">↻ Опитай отново</button></div>';
+  N("davidAdminRetry")?.addEventListener("click",()=>{if(g.view==="admin")ct()});
+ }
+ return Promise.resolve().then(()=>davidPendingAdminPanel()).catch(err=>{
+  console.error("[DAVID] Google approvals panel failed",err);
+  if(g.view!=="admin")return;
+  const p=N("content");if(!p)return;
+  const fallback=document.createElement("section");fallback.className="card warning";fallback.setAttribute("role","alert");
+  const heading=document.createElement("h2");heading.textContent="Google одобренията не са заредени";fallback.append(heading);
+  const msg=document.createElement("p");msg.textContent=String(err?.message||err);fallback.append(msg);
+  const retry=document.createElement("button");retry.className="btn";retry.textContent="↻ Опитай отново";retry.onclick=()=>{if(g.view==="admin")ct()};fallback.append(retry);
+  p.prepend(fallback)
+ })
+}}}
 
 
 async function davidTaskPage(){
@@ -243,7 +262,8 @@ async function davidPendingAdminPanel(){
    list.innerHTML=pending.map(r=>
     '<div class="row" style="padding:10px 0;gap:12px;flex-wrap:wrap;border-bottom:1px solid #ddd">'+
     '<div><b>'+I(r.name||r.email||"Google потребител")+'</b><p class="tiny">'+I(r.email||"")+'</p></div>'+
-    '<button class="btn green" type="button" data-google-approve="'+I(r.user_id)+'">✓ Одобри оператор</button>'+
+    ''<label class="tiny">Категория <select class="field" data-google-kind="'+I(r.user_id)+'"><option value="operator">Оператор</option><option value="test">Тест</option><option value="test2">Тест 2</option></select></label>'+
+    <button class="btn green" type="button" data-google-approve="'+I(r.user_id)+'">✓ Одобри оператор</button>'+
     '<button class="btn red" type="button" data-google-deny="'+I(r.user_id)+'">✕ Откажи</button></div>'
    ).join('');
    for(const btn of list.querySelectorAll("[data-google-approve],[data-google-deny]")){
@@ -252,7 +272,8 @@ async function davidPendingAdminPanel(){
      const approved=!!btn.dataset.googleApprove;
      btn.disabled=true;
      try{
-      const {data:reply,error:reviewError}=await g.db.rpc("david_admin_review_google_access",{p_user_id:id,p_approve:approved});
+      const kind=list.querySelector('[data-google-kind="'+CSS.escape(id)+'"]')?.value||"operator";
+      const {data:reply,error:reviewError}=await g.db.rpc("david_admin_review_google_access",{p_user_id:id,p_approve:approved,p_operator_kind:kind});
       if(reviewError)throw reviewError;
       if(reply?.ok!==true)throw Error("Неуспешен отговор.");
       re(approved?"Операторът е одобрен.":"Заявката е отказана.");
