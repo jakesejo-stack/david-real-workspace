@@ -77,7 +77,7 @@ async function handleTaskVoice(req,res){
   });
   if(error)return dialReject(res,'Daily calling limit or verification failed.');
   const twiml=new twilio.twiml.VoiceResponse();
-  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,answerOnBridge:true,record:'do-not-record'});
+  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record'});
   dial.number(phone);
   res.setHeader('Content-Type','text/xml; charset=utf-8');
   res.setHeader('Cache-Control','no-store');
