@@ -235,3 +235,32 @@ export async function mountMyCompanies(container,db) {
    }
   }catch(err){list.replaceChildren();showError(list,err)}
  }
+
+ async function openDetail(companyId){
+  detail.replaceChildren(el(d,'p','Зареждане на Company Info...'));
+  try{
+   const result=await companyDetail(db,companyId);
+   const info=result.company;
+   detail.replaceChildren(el(d,'h3',info.name));
+   for(const [label,value] of [
+    ['Държава',info.country],['Град',info.city],['Сектор',info.sector],
+    ['Информация',info.research_notes],['Контакт',info.contact_name],
+    ['Имейл',info.contact_email],['Телефон',info.contact_phone]]){
+    if(value) detail.append(el(d,'p',label+': '+value));
+   }
+   detail.append(el(d,'h4','Моите задачи'));
+   for(const t of result.tasks) detail.append(el(d,'p',t.title+' · '+t.status));
+   detail.append(el(d,'h4','Моята история на контактите'));
+   if(!result.my_history.length) detail.append(el(d,'p','Няма записани контакти.'));
+   for(const entry of result.my_history){
+    const when=new Date(entry.created_at).toLocaleString('bg-BG');
+    const next=entry.followup_at?' · Следващо: '+new Date(entry.followup_at).toLocaleString('bg-BG'):'';
+    detail.append(el(d,'p',when+' · '+(OUTCOMES[entry.outcome]||entry.outcome)
+     +(entry.notes?' · '+entry.notes:'')+next+' · Операторски отчет'));
+   }
+  }catch(err){detail.replaceChildren();showError(detail,err)}
+ }
+ search.input.addEventListener('input',run);
+ await run();
+ return {refresh:run};
+}
