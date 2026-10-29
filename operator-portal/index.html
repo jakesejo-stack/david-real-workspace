@@ -92,6 +92,13 @@ async function displayState(){
     const companies=Array.isArray(snapshot.companies)?snapshot.companies:[];
     // RLS protects operator-specific manual history; no cross-operator data.
     const ids=companies.map(c=>c.id).filter(Boolean);
+    const taskByCompany=new Map();
+    if(ids.length){
+      // RLS guarantees a worker sees only their currently assigned company's task.
+      const {data:assigned,error:taskError}=await db.from('david_companies')
+       .select('id,task').eq('assigned_to',currentUser.id).in('id',ids);
+      if(!taskError)for(const row of assigned||[])if(row.task)taskByCompany.set(row.id,row.task);
+    }
     let history=[];
     if(ids.length){
       const {data, error:historyError}=await db.from('david_manual_contact_results')
@@ -116,6 +123,8 @@ async function displayState(){
       card.append(addText('h3',c.name),addText('div',(c.country||'')+' · '+(c.sector||''),'meta'));
       const state=c.do_not_call?'Без контакт':c.calling_approved?'Одобрен за контакт':'Очаква разрешение';
       card.append(addText('p',state,'meta'));
+      const assignedTask=taskByCompany.get(c.id);
+      if(assignedTask)card.append(addText('p','Задача: '+assignedTask,'meta'));
       const mine=history.filter(r=>r.company_id===c.id);
       const historySection=addText('details',null,'');
       const summary=addText('summary','Моя история на контактите ('+mine.length+')');
