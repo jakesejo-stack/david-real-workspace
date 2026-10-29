@@ -1,0 +1,137 @@
+name: DAVID safe Git to Vercel (20-minute check)
+
+on:
+  schedule:
+    # UTC; avoids the top-of-hour GitHub Actions scheduling peak
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: david-verified-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  production:
+    # FAIL CLOSED. The present source is incomplete and the repository is public.
+    # This job can run only after a reviewed source recovery, a PRIVATE repo,
+    # and an explicit owner-enabled repository variable.
+    if: ${{ github.event.repository.private == true && vars.DAVID_AUTODEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    environment: production
+    env:
+      VERCEL_ORG_ID: team_5q6VN5bk31vPKkudtlROa3ct
+      VERCEL_PROJECT_ID: prj_wJOAuRlfScMMDDabk8PmzpbpznWW
+      DAVID_PRODUCTION_DOMAIN: david-real-workspace.vercel.app
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Require completely recovered and approved source
+        shell: bash
+        run: |
+          set -euo pipefail
+          for required in package.json package-lock.json index.html vercel.json api/voice.js api/token.js api/config.js .david-full-source-verified; do
+            if [[ ! -s "$required" ]]; then
+              echo "::error::Missing verified production source: $required"
+              exit 1
+            fi
+          done
+          node -e 'const p=require("./package.json"); if(!p.scripts?.build || !p.scripts?.test) process.exit(1)'
+          echo "Full source gate passed. No production secrets used yet."
+
+      - name: Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Unit and reproducible build (no Vercel token)
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@65.1.0
+
+      - name: Link to the EXISTING DAVID project (no new project)
+        run: |
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+
+      - name: Skip unchanged live production source
+        id: diff
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          url="https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&target=production&limit=50"
+          curl --fail --silent --show-error --retry 2 --header "Authorization: Bearer $VERCEL_TOKEN" "$url" > /tmp/david-deployments.json
+          if jq -e --arg sha "$GITHUB_SHA" --arg domain "$DAVID_PRODUCTION_DOMAIN" '
+            any(.deployments[]?;
+              (.meta.davidGitSha // "") == $sha
+              and ((.alias // []) | index($domain) != null)
+              and ((.state // .readyState // "") == "READY")
+            )
+          ' /tmp/david-deployments.json > /dev/null; then
+            echo "Already live: $GITHUB_SHA; no duplicate paid build."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New reviewed commit: $GITHUB_SHA"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull production build configuration
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production
+
+      - name: Build for existing DAVID Vercel project
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --prod
+
+      - name: Stage a production build WITHOUT changing the live domain
+        if: steps.diff.outputs.changed == 'true'
+        id: stage
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_url="$(vercel deploy --prebuilt --prod --skip-domain --meta "davidGitSha=$GITHUB_SHA")"
+          if [[ ! "$deployment_url" =~ ^https://[a-zA-Z0-9.-]+[.]vercel[.]app$ ]]; then
+            echo "::error::Unexpected Vercel deployment URL"
+            exit 1
+          fi
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the exact staged deployment
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel curl / --deployment "$STAGED_URL" --fail --silent --show-error --output /dev/null
+          vercel curl /api/config --deployment "$STAGED_URL" --fail --silent --show-error \
+            | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const v=JSON.parse(s);if(typeof v.databaseConfigured!=="boolean"||typeof v.liveCallsEnabled!=="boolean")process.exit(1)})'
+
+      - name: Promote only the verified staged build
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: vercel promote "$STAGED_URL"
