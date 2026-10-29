@@ -52,7 +52,7 @@ async function davidTaskPage(){
   const {data:{session}}=await g.db.auth.getSession();
   if(!session?.access_token)throw Error("Google входът е изтекъл.");
   const method=action==="list"?"GET":"POST";
-  const res=await fetch("/api/dpp/tasks/"+action,{method,credentials:"same-origin",cache:"no-store",
+  const res=await fetch("/api/integrations/david/tasks-"+action,{method,credentials:"same-origin",cache:"no-store",
    headers:{"Authorization":"Bearer "+session.access_token,...(method==="POST"?{"Content-Type":"application/json"}:{})},
    ...(method==="POST"?{body:JSON.stringify(params)}:{})});
   const data=await res.json().catch(()=>({}));
