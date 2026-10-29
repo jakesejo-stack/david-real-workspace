@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: Checkout last approved main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9f683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
