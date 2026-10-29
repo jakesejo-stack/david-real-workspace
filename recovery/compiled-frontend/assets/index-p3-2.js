@@ -163,24 +163,32 @@ async function davidTaskPage(){
 }
 
 function davidMyCompaniesPage(){
+ // Always render an immediately usable search from the existing scoped CRM.
+ // Enhanced, persistent history takes over only when the secure RPC is available.
  if(g.role==="worker"&&g.db){
   import("/david-modules/operator-company-workflows.mjs").then(async m=>{
    await m.myCompanies(g.db);
    if(g.view!=="mycompanies")return;
    const page=N("content");if(!page||document.getElementById("davidMitkoMyCompanies"))return;
-   const extra=document.createElement("section");extra.className="card";extra.id="davidMitkoMyCompanies";page.prepend(extra);
+   const extra=document.createElement("section");extra.className="card";extra.id="davidMitkoMyCompanies";
+   page.prepend(extra);
    await m.mountMyCompanies(extra,g.db);
-  }).catch(err=>console.info("[DAVID] History awaits SQL 016–018",err?.message||err));
+   if(extra.isConnected){
+    const legacy=N("myCompanyLegacyResults");if(legacy)legacy.hidden=true;
+   }
+  }).catch(err=>console.info("[DAVID] Private history RPC is not yet installed; using existing worker-scoped CRM search",err?.message||err));
  }
  const mine=(g.companies||[]).filter(c=>c.assigned_to===g.user?.id);
  const results=g.manualResults||[];
  const labels={no_answer:"Неотговорено",declined:"Отказ",interested:"Има интерес",callback:"Обратно обаждане",do_not_contact:"Без повече контакт"};
- let html=Ct("Моите фирми","Само фирмите, назначени от Admin. Ръчните контакти се записват отделно от Twilio, без измислен CallSid.");
+ let html=Ct("Моите фирми","Търси фирми от задачите и своята история. Отчетите са лични за оператора; администраторите виждат екипния отчет.");
+ html+='<div class="card"><label><strong>🔎 Търсене в Моите фирми</strong><input id="myCompanySearch" class="field" type="search" placeholder="Име на фирма, държава или сектор" autocomplete="off"></label><p id="myCompanySearchCount" class="tiny" role="status">Зареждане на резултати...</p></div>';
+ html+='<div id="myCompanyLegacyResults">';
  html+='<div class="card"><div class="row"><h2>Моите B2B фирми</h2><span class="tag">'+mine.length+' назначения</span><button id="myCompaniesReload" class="btn">↻ Обнови</button></div><p class="tiny">Контактувай само от разрешен служебен телефон, след законна проверка и при липса на възражение. Тук не се извършват обаждания.</p></div>';
  html+=mine.length?mine.map(c=>{
   const approved=!!c.calling_approved&&!c.do_not_call&&/^\+[1-9][0-9]{5,14}$/.test(c.contact_phone||"")&&String(c.contact_source||"").trim().length>=5;
   const history=results.filter(r=>r.company_id===c.id).slice(0,6);
-  return '<section class="card"><div class="row"><h2>'+I(c.company_name)+'</h2><span class="tag '+(approved?"green":"orange")+'">'+(approved?"Разрешен ръчен контакт":"Не е одобрен за контакт")+'</span></div>'
+  return '<section class="card" data-my-company-search="'+I([c.company_name,c.country,c.city,c.sector].filter(Boolean).join(" ").toLocaleLowerCase("bg-BG"))+'"><div class="row"><h2>'+I(c.company_name)+'</h2><span class="tag '+(approved?"green":"orange")+'">'+(approved?"Разрешен ръчен контакт":"Не е одобрен за контакт")+'</span></div>'
    +'<div class="fields"><div><small>Държава / Град</small><strong>'+I(c.country||"—")+' / '+I(c.city||"—")+'</strong></div><div><small>Сектор</small><strong>'+I(c.sector||"—")+'</strong></div>'
    +'<div><small>Служебен телефон</small><strong>'+(approved?I(c.contact_phone):"Не е разрешен за показване/контакт")+'</strong></div><div><small>Източник на контакта</small><strong>'+I(c.contact_source||"Не е документиран")+'</strong></div></div>'
    +'<p class="tiny">Задача: '+I(c.task||"Няма зададена")+'</p>'
@@ -195,7 +203,17 @@ function davidMyCompaniesPage(){
    +'<div style="margin-top:14px"><h3>История на ръчните действия</h3>'
    +(history.length?history.map(r=>'<p class="tiny"><b>'+I(labels[r.outcome]||r.outcome)+'</b> · '+I(js(r.created_at))+(r.notes?' · '+I(r.notes):'')+'</p>').join(""):'<p class="tiny">Все още няма записан ръчен контакт.</p>')+'</div></section>';
  }).join(""):'<div class="card"><p class="muted">Няма назначени фирми. Администраторът може да ги разпредели от Admin Panel → Фирми.</p></div>';
+ html+='</div>';
  N("content").innerHTML=html;
+ const find=N("myCompanySearch"),counter=N("myCompanySearchCount");
+ const filterMine=()=>{const q=(find?.value||"").trim().toLocaleLowerCase("bg-BG");let shown=0;
+  document.querySelectorAll("[data-my-company-search]").forEach(el=>{
+   el.hidden=!!q&&!String(el.getAttribute("data-my-company-search")||"").includes(q);
+   if(!el.hidden)shown++;
+  });
+  if(counter)counter.textContent=shown+" фирми · личен списък";
+ };
+ if(find)find.addEventListener("input",filterMine);filterMine();
  N("myCompaniesReload").onclick=()=>Pe();
  document.querySelectorAll("[data-manual-save]").forEach(button=>button.onclick=async()=>{
   const id=button.dataset.manualSave;
