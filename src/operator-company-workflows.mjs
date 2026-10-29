@@ -283,13 +283,22 @@ export async function mountAdminActivity(container,db) {
   // A missing/new interaction table must not blank the worker/company roster.
   for(const x of [members,companies])if(x.error)throw x.error;
   const historyUnavailable=!!interactions.error;
+  let legacy=[];
+  if(historyUnavailable){
+   const manual=await db.from('david_manual_contact_results')
+    .select('id,company_id,worker_user_id,outcome,notes,created_at,followup_at')
+    .order('created_at',{ascending:false}).limit(2000);
+   if(!manual.error)legacy=(manual.data||[]).map(x=>({...x,source:'manual_operator_report'}));
+  }
   const people=new Map((members.data||[]).map(x=>[x.user_id,x]));
   const firms=new Map((companies.data||[]).map(x=>[x.id,x]));
-  entries=(interactions.data||[]).map(x=>({ ...x,worker:people.get(x.worker_user_id),company:firms.get(x.company_id)}));
+  entries=(historyUnavailable?legacy:(interactions.data||[])).map(x=>({
+   ...x,worker:people.get(x.worker_user_id),company:firms.get(x.company_id)
+  }));
   status.textContent='Оператори: '+(members.data||[]).filter(x=>x.role==='worker').length+
    ' · Фирми: '+firms.size+' · Записани операторски отчети: '+entries.length+
    ' (не са аудиозаписи или автоматична транскрипция).'+
-   (historyUnavailable?' · Историята изисква миграция 017.':'')+'';
+   (historyUnavailable?' · Показвам наличните ръчни отчети от старото CRM.':'')+'';
   const roster=el(d,'section');roster.className='card';container.insertBefore(roster,result);
   roster.append(el(d,'h3','Всички оператори'));
   for(const p of (members.data||[]).filter(x=>x.role==='worker')){
