@@ -67,7 +67,7 @@ async function davidTaskPage(){
   if(!document.getElementById("dppTaskStyle")){
    const style=document.createElement("link");style.id="dppTaskStyle";style.rel="stylesheet";style.href="/dppcenter-v2-taskboard.css";document.head.append(style);
   }
-  const mod=await import("/dppcenter-v2-taskboard.js");
+  const mod=await import(/* @vite-ignore */ "/dppcenter-v2-taskboard.js");
   if(g.view!=="tasks"||!root.isConnected)return;
   N("davidTasksLoad")?.remove();
   const api={listTasks:()=>apiRequest("list"),createTask:data=>apiRequest("create",data),
