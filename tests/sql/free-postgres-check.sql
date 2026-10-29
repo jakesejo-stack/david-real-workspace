@@ -62,7 +62,9 @@ begin
  if jsonb_array_length(v)<>1 then raise exception 'Assigned company not scoped';end if;
  v:=public.david_worker_company_detail('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
  if v->>'ok'<>'true' then raise exception 'Company detail failed'; end if;
- select id into t from public.david_admin_tasks limit 1;
+ -- Operators obtain their own task ID through the authorized RPC, never direct table SELECT.
+ v:=public.david_worker_my_tasks();
+ t:=(v->0->>'task_id')::uuid;
  v:=public.david_worker_save_task_interaction(t,'note','Synthetic note',null,false);
  if v->>'source'<>'operator_self_reported' then
    raise exception 'Manual entry mislabelled as real Twilio call';end if;
