@@ -1,0 +1,23 @@
+name: Original DPP operator portal static QA
+on:
+  push:
+    branches: [feature/original-operator-portal-safe-20261030]
+    paths:
+      - 'operator-portal/**'
+      - '.github/workflows/original-operator-portal-qa.yml'
+  pull_request:
+    paths:
+      - 'operator-portal/**'
+      - '.github/workflows/original-operator-portal-qa.yml'
+permissions:
+  contents: read
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - run: node operator-portal/check.mjs
