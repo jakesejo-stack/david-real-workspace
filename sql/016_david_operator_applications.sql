@@ -89,3 +89,21 @@ begin
 end $$;
 revoke all on function public.david_admin_google_access_requests() from public,anon;
 grant execute on function public.david_admin_google_access_requests() to authenticated;
+
+create or replace function public.david_admin_daily_workers() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare v jsonb;
+begin
+ if not david_internal.david_is_admin() then raise exception 'Admin required' using errcode='42501';end if;
+ select coalesce(jsonb_agg(jsonb_build_object(
+ 'email',u.email,'name',coalesce(a.full_name,m.display_name),'user_id',m.user_id,
+ 'country',a.country,'languages',coalesce(a.languages,array[]::text[]))),'[]'::jsonb)
+ into v from public.david_members m join auth.users u on u.id=m.user_id
+ join public.david_worker_identities wi on wi.user_id=m.user_id and wi.active=true
+ left join public.david_operator_applications a on a.user_id=m.user_id
+ where m.role='worker' and u.email_confirmed_at is not null
+ and exists(select 1 from auth.identities i where i.user_id=u.id and i.provider='google');
+ return v;
+end $$;
+revoke all on function public.david_admin_daily_workers() from public,anon;
+grant execute on function public.david_admin_daily_workers() to authenticated;
