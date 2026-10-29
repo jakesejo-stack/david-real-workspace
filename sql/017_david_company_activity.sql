@@ -49,3 +49,22 @@ begin
 end $$;
 revoke all on function public.david_admin_create_company_task(uuid,uuid,text,text,text,timestamptz) from public,anon;
 grant execute on function public.david_admin_create_company_task(uuid,uuid,text,text,text,timestamptz) to authenticated;
+
+create or replace function public.david_worker_my_tasks()
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_tasks jsonb;v_uid uuid:=auth.uid();
+begin
+ if v_uid is null or not david_internal.david_is_active_member()
+ or not exists(select 1 from public.david_members where user_id=v_uid and role='worker')
+ then raise exception 'Active operator required' using errcode='42501';end if;
+ select coalesce(jsonb_agg(jsonb_build_object(
+ 'task_id',t.id,'company_id',t.company_id,'company_name',c.company_name,
+ 'country',c.country,'title',t.title,'description',t.description,
+ 'priority',t.priority,'status',t.status,'due_at',t.due_at,'created_at',t.created_at)
+ order by t.created_at desc),'[]'::jsonb) into v_tasks
+ from public.david_admin_tasks t left join public.david_companies c on c.id=t.company_id
+ where t.assigned_to=v_uid;
+ return v_tasks;
+end $$;
+revoke all on function public.david_worker_my_tasks() from public,anon;
+grant execute on function public.david_worker_my_tasks() to authenticated;
