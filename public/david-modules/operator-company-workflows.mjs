@@ -212,7 +212,7 @@ export async function mountWorkerTasks(container,db,afterSave=()=>{}) {
 
 export async function mountMyCompanies(container,db) {
  const d=container.ownerDocument;
- container.replaceChildren(el(d,'h2','Моите фирми / Company Info'));
+ container.replaceChildren(el(d,'h2','Моите фирми'));
  const search=field(d,'Търси по фирма, държава или сектор','search');
  const list=el(d,'section'),detail=el(d,'section');
  container.append(search.box,list,detail);
@@ -224,7 +224,7 @@ export async function mountMyCompanies(container,db) {
    const rows=await myCompanies(db,search.input.value);
    if(requestId!==request)return;
    list.replaceChildren();
-   if(!rows.length)list.append(el(d,'p','Няма фирми в твоята история.'));
+   if(!rows.length)list.append(el(d,'p','Няма фирми, по които си работил. Те се запазват тук след отчетен контакт от задача.'));
    for(const c of rows){
     const button=el(d,'button',c.company_name+' — '+c.country+
      ' · Мои контакти: '+c.my_contact_count+
@@ -237,7 +237,7 @@ export async function mountMyCompanies(container,db) {
  }
 
  async function openDetail(companyId){
-  detail.replaceChildren(el(d,'p','Зареждане на Company Info...'));
+  detail.replaceChildren(el(d,'p','Зареждане на фирмата...'));
   try{
    const result=await companyDetail(db,companyId);
    const info=result.company;
@@ -263,4 +263,45 @@ export async function mountMyCompanies(container,db) {
  search.input.addEventListener('input',run);
  await run();
  return {refresh:run};
+}
+
+// Admin-only summary. The database enforces authorization/RLS; never fetch other
+// workers' history into a worker session. A note is not an audio transcript.
+export async function mountAdminActivity(container,db) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Оператори, фирми и история на контактите'));
+ const search=field(d,'Търси оператор, фирма, държава или бележка','search');
+ const status=el(d,'p','Зареждане...'),result=el(d,'section');
+ container.append(search.box,status,result);
+ let entries=[];
+ try {
+  const [members,companies,interactions]=await Promise.all([
+   db.from('david_members').select('user_id,role,display_name').limit(500),
+   db.from('david_companies').select('id,company_name,country,assigned_to').limit(5000),
+   db.from('david_company_interactions').select('id,company_id,worker_user_id,outcome,notes,created_at,source,followup_at').order('created_at',{ascending:false}).limit(2000)
+  ]);
+  for(const x of [members,companies,interactions])if(x.error)throw x.error;
+  const people=new Map((members.data||[]).map(x=>[x.user_id,x]));
+  const firms=new Map((companies.data||[]).map(x=>[x.id,x]));
+  entries=(interactions.data||[]).map(x=>({ ...x,worker:people.get(x.worker_user_id),company:firms.get(x.company_id)}));
+  status.textContent='Оператори: '+(members.data||[]).filter(x=>x.role==='worker').length+
+   ' · Фирми: '+firms.size+' · Записани операторски отчети: '+entries.length+
+   ' (не са аудиозаписи или автоматична транскрипция).';
+  const render=()=>{
+   const q=search.input.value.trim().toLocaleLowerCase('bg-BG');
+   const rows=entries.filter(x=>[x.worker?.display_name,x.company?.company_name,x.company?.country,x.notes,x.outcome]
+    .some(v=>String(v||'').toLocaleLowerCase('bg-BG').includes(q)));
+   result.replaceChildren();
+   for(const x of rows.slice(0,250)){
+    const card=el(d,'article');card.className='company';
+    card.append(el(d,'strong',(x.worker?.display_name||x.worker_user_id)+' · '+(x.company?.company_name||x.company_id)));
+    card.append(el(d,'p',new Date(x.created_at).toLocaleString('bg-BG')+' · '+(OUTCOMES[x.outcome]||x.outcome)));
+    if(x.notes)card.append(el(d,'p','Отчет на оператора: '+x.notes));
+    if(x.followup_at)card.append(el(d,'p','Следващ контакт: '+new Date(x.followup_at).toLocaleString('bg-BG')));
+    result.append(card);
+   }
+   if(!rows.length)result.append(el(d,'p','Няма записани контакти по тази търсачка.'));
+  };
+  search.input.addEventListener('input',render);render();
+ }catch(e){status.textContent='Администраторският отчет е недостъпен: '+String(e?.message||e)}
 }
