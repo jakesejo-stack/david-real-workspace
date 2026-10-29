@@ -142,3 +142,70 @@ export async function mountAdminApplications(container,db) {
   }
  }catch(e){showError(container,e)}
 }
+
+export async function mountAdminCompanyTask(container,db,companies) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Нова задача за фирма'));
+ const {getApprovedWorkers}=await import('./admin-worker-picker.mjs');
+ try {
+  const workers=await getApprovedWorkers(db);
+  const form=el(d,'form'),assignee=el(d,'select'),company=el(d,'select');
+  assignee.append(el(d,'option','Избери одобрен Gmail'));
+  for(const w of workers){const o=el(d,'option',w.label);o.value=w.id;assignee.append(o)}
+  company.append(el(d,'option','Избери фирма'));
+  for(const c of companies){const o=el(d,'option',c.company_name);o.value=c.id;company.append(o)}
+  const title=field(d,'Задача'),notes=field(d,'Инструкции');
+  const send=el(d,'button','Възложи задачата');send.type='submit';
+  form.append(assignee,company,title.box,notes.box,send);
+  form.addEventListener('submit',async e=>{
+   e.preventDefault();send.disabled=true;
+   try{
+    if(!workers.some(w=>w.id===assignee.value)||!companies.some(c=>c.id===company.value))
+     throw new Error('Избери оператор и фирма');
+    const result=await adminCreateCompanyTask(db,{
+     workerId:assignee.value,companyId:company.value,
+     title:title.input.value,description:notes.input.value});
+    form.append(el(d,'p','Задача '+result.task_id+' е възложена на '+result.recipient));
+   }catch(err){showError(form,err)}finally{send.disabled=false}
+  });
+  container.append(form);
+ }catch(err){showError(container,err)}
+}
+
+export async function mountWorkerTasks(container,db,afterSave=()=>{}) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Моите задачи'));
+ try{
+  const tasks=await myTasks(db);
+  if(!tasks.length)container.append(el(d,'p','Все още няма възложени задачи.'));
+  for(const task of tasks){
+   const card=el(d,'section');
+   card.append(el(d,'h3',task.title+' — '+(task.company_name||'Обща задача')));
+   card.append(el(d,'p',task.description||''));
+   card.append(el(d,'p','Статус: '+task.status));
+   if(task.company_id){
+    const form=el(d,'form'),outcome=el(d,'select');
+    for(const [value,label] of Object.entries(OUTCOMES)){
+     const o=el(d,'option',label);o.value=value;outcome.append(o);
+    }
+    const note=field(d,'Бележки'),next=field(d,'Следващо обаждане (дата/час)','datetime-local');
+    const check=field(d,'');check.input.type='checkbox';
+    check.box.firstChild.textContent='Потвърждавам, че контактът е реален (или избери само бележка)';
+    const save=el(d,'button','Запази резултата');save.type='submit';
+    form.append(outcome,note.box,next.box,check.box,save);
+    form.addEventListener('submit',async e=>{
+     e.preventDefault();save.disabled=true;
+     try{
+      const follow=next.input.value?new Date(next.input.value).toISOString():null;
+      await saveTaskContact(db,{taskId:task.task_id,outcome:outcome.value,
+       notes:note.input.value,followupAt:follow,confirmed:check.input.checked});
+      await mountWorkerTasks(container,db,afterSave);
+      afterSave();
+     }catch(err){showError(form,err);save.disabled=false}
+    });
+    card.append(form);
+   }
+   container.append(card);
+  }
+ }catch(err){showError(container,err)}
+}
