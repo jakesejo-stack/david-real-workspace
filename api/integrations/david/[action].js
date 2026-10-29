@@ -103,8 +103,18 @@ async function handleTaskStatus(req,res){
 
 const sameOrigin = req => {
  const origin = String(req.headers.origin||'');
- const expected = String(process.env.PUBLIC_ORIGIN||'').replace(/\/$/,'');
- return !origin || (expected && origin === expected);
+ if(!origin)return true; // Server-to-server or same-origin GET without Origin. Bearer auth is still mandatory.
+ try{
+  const u=new URL(origin);
+  const host=String(req.headers.host||'').toLowerCase();
+  const configured=String(process.env.PUBLIC_ORIGIN||'').replace(/\/$/,'');
+  // Browser calls must originate from the exact host serving the page.
+  // PUBLIC_ORIGIN (if configured) is also permitted for canonical redirects.
+  return u.protocol==='https:' && (
+   (host && u.host.toLowerCase()===host) ||
+   (configured && origin===configured)
+  );
+ }catch{return false}
 };
 const goodId = s => typeof s==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const modes=['TODO','IN_PROGRESS','BLOCKED','REVIEW','DONE'];
