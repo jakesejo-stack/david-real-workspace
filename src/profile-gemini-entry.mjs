@@ -14,7 +14,7 @@ async function request(method,key){
  const response=await fetch('/api/gemini-key',{method,headers:{
   Authorization:'Bearer '+s.access_token,...(key?{'Content-Type':'application/json'}:{})
  },...(key?{body:JSON.stringify({key})}:{})});
- if(!response.ok)throw Error('Gemini key request failed');
+ if(!response.ok){const body=await response.json().catch(()=>({}));const err=new Error(body.error||'Gemini key request failed');err.status=response.status;throw err;}
  return response.json();
 }
 // Keep the original DAVID profile layout, but replace its blue Tasks CTA
