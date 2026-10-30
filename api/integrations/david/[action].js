@@ -108,9 +108,10 @@ async function handleTaskDialFinished(req,res){
  const state=raw==='completed'?'completed':raw==='canceled'?'canceled':'failed';
  const duration=Number(req.body?.DialCallDuration);
  const db=serviceClient();
- const patch={state,ended_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+ const endedAt=new Date();
+ const patch={state,ended_at:endedAt.toISOString(),updated_at:endedAt.toISOString()};
  const attemptPatch={status:raw,updated_at:new Date().toISOString()};
- if(Number.isInteger(duration)&&duration>=0&&duration<=7200)attemptPatch.duration_seconds=duration;
+ if(Number.isInteger(duration)&&duration>=0&&duration<=7200){attemptPatch.duration_seconds=duration;if(raw==='completed')patch.started_at=new Date(endedAt.getTime()-duration*1000).toISOString();}
  const [s,a]=await Promise.all([
   db.from('david_live_call_sessions').update(patch).eq('call_sid',sid),
   db.from('david_task_call_attempts').update(attemptPatch).eq('parent_call_sid',sid)
