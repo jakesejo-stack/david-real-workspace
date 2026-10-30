@@ -1,0 +1,45 @@
+name: Operator private history isolated SQL QA
+on:
+  push:
+    branches: [feature/original-operator-portal-safe-20261030]
+    paths:
+      - 'sql/020_operator_private_history.sql'
+      - 'tests/sql/operator-history-check.sql'
+      - 'tests/sql/operator-profiles-fixture.sql'
+      - '.github/workflows/operator-history-qa.yml'
+  pull_request:
+    paths:
+      - 'sql/020_operator_private_history.sql'
+      - 'tests/sql/operator-history-check.sql'
+      - 'tests/sql/operator-profiles-fixture.sql'
+      - '.github/workflows/operator-history-qa.yml'
+permissions:
+  contents: read
+jobs:
+  history-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: david_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d david_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: david_test
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/operator-profiles-fixture.sql
+      - run: psql -X -v ON_ERROR_STOP=1 -f sql/020_operator_private_history.sql
+      - run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/operator-history-check.sql
