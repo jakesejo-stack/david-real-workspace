@@ -24,8 +24,21 @@ function install(){
  main.append(panel);
  const state=panel.querySelector('#sf-ai-state'),form=panel.querySelector('#sf-ai-form'),prompt=panel.querySelector('#sf-ai-prompt'),messages=panel.querySelector('#sf-ai-messages');
  const add=(who,message)=>{const item=document.createElement('div');item.className='notice';item.style.background=who==='DAVID'?'#e8f2ff':'#fff';const strong=document.createElement('strong');strong.textContent=who+': ';item.append(strong,document.createTextNode(message));messages.append(item);messages.scrollTop=messages.scrollHeight;};
+ let historyLoaded=false;
+ const loadHistory=async()=>{
+  if(historyLoaded)return;
+  try{
+   const token=await authToken();
+   const r=await fetch('/api/david-ai-history',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   const data=await r.json();
+   if(!r.ok)throw Error(data.error||'Историята не е достъпна');
+   messages.replaceChildren();
+   for(const item of data.messages||[])add(item.role==='user'?'Ти':'DAVID',item.content);
+   historyLoaded=true;
+  }catch(error){add('Система','Неуспешно зареждане на историята: '+error.message)}
+ };
  const check=async()=>{try{const token=await authToken();const r=await fetch('/api/gemini-key',{headers:{Authorization:'Bearer '+token}});const data=await r.json();state.textContent=data.connected?'✓ Gemini свързан':'Gemini не е свързан';state.className='tag '+(data.connected?'green':'orange');}catch{state.textContent='Не може да се провери връзката';state.className='tag red';}};
- btn.addEventListener('click',()=>{visible=true;main.querySelectorAll(':scope > *').forEach(el=>{if(el!==panel)el.style.display='none'});panel.classList.remove('hidden');parent.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');check();});
+ btn.addEventListener('click',()=>{visible=true;main.querySelectorAll(':scope > *').forEach(el=>{if(el!==panel)el.style.display='none'});panel.classList.remove('hidden');parent.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');check();loadHistory();});
  parent.addEventListener('click',event=>{if(event.target===btn||btn.contains(event.target))return;if(!visible)return;visible=false;panel.classList.add('hidden');btn.classList.remove('active');main.querySelectorAll(':scope > *').forEach(el=>{if(el!==panel)el.style.removeProperty('display')});},true);
  form.addEventListener('submit',async e=>{e.preventDefault();const message=prompt.value.trim();if(!message)return;const send=form.querySelector('button');send.disabled=true;add('Ти',message);prompt.value='';try{const token=await authToken();const r=await fetch('/api/soulflame-ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw Error(data.error||'AI error');add('DAVID',data.reply);}catch(error){add('Система',error.message);}finally{send.disabled=false;}});
 }
