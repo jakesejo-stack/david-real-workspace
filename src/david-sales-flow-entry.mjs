@@ -46,7 +46,13 @@ async function startApprovedCall(status){
   call.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);finish()});
   activeCallStatus='☎ Набиране на '+task.dialTo;status(activeCallStatus);
  }catch(error){
-  activeCallStatus='Неуспешно обаждане: '+String(error?.message||error);
+  const hints={
+   twilio_task_configuration_incomplete:'Twilio е изключен или липсват сървърни ключове. Свържете администратора.',
+   no_approved_dial_target:'Няма одобрена задача с разрешен телефонен номер за днес.',
+   daily_call_already_attempted:'За днешната задача вече има направен опит за обаждане.',
+   limit_check_unavailable:'Не може да се потвърди лимитът за обаждания. Не набираме.'
+  };
+  activeCallStatus='Неуспешно обаждане: '+(hints[String(error?.message||'')]||String(error?.message||error));
   status(activeCallStatus);
   if(callingDevice&&!callingCall){try{callingDevice.destroy()}catch{}callingDevice=null;}
   throw error;
