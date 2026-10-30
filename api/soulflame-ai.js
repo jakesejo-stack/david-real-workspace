@@ -18,6 +18,9 @@ export default async function handler(req,res){
  const {data:record,error:dbError}=await admin.from('david_operator_gemini_keys').select('encrypted_key').eq('user_id',user.id).maybeSingle();
  if(dbError)return res.status(500).json({error:'Storage unavailable'});
  if(!record?.encrypted_key)return res.status(409).json({error:'Connect Gemini in Google profile first'});
+ const {data:priorRows,error:priorError}=await admin.from('david_ai_messages').select('role,content').eq('user_id',user.id).order('id',{ascending:false}).limit(12);
+ if(priorError)return res.status(500).json({error:'Conversation memory unavailable'});
+ const history=(priorRows||[]).reverse().map(row=>({role:row.role==='assistant'?'model':'user',parts:[{text:row.content}]}));
  const {error:saveInputError}=await admin.from('david_ai_messages').insert({user_id:user.id,role:'user',content:message.trim()});
  if(saveInputError)return res.status(500).json({error:'Не успяхме да запазим съобщението. Опитай пак.'});
  let apiKey;
@@ -39,7 +42,7 @@ export default async function handler(req,res){
    headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
    body:JSON.stringify({
     systemInstruction:{parts:[{text:'You are DAVID, the SoulFlame DPP operator assistant. Reply in the user language. Be precise, brief, helpful, and never invent facts. Prefer 1-3 sentences.'}]},
-    contents:[{role:'user',parts:[{text:message.trim()}]}],
+    contents:[...history,{role:'user',parts:[{text:message.trim()}]}],
     generationConfig:{maxOutputTokens:220,temperature:0.2,thinkingConfig:{thinkingLevel:'minimal'}}
    }),
    signal:AbortSignal.timeout(7000)
