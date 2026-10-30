@@ -37,8 +37,9 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
       if(result?.saved!==true)throw Error('Save not confirmed');
       field.value='';
       showStatus('✓ Готово! Gemini API ключът е запазен успешно и е свързан с този Google профил.',true);
-    }catch{
-      showStatus('✕ Ключът не е записан. Провери достъпа и опитай отново.');
+    }catch(error){
+      const messages={401:'Google сесията не е потвърдена. Излез и влез отново през Google.',403:'Този Google профил няма одобрено членство в DAVID. Администратор трябва да го одобри.',400:'Сървърът отхвърля формата на ключа.',503:'Сървърната конфигурация за защитено записване е непълна.',500:'Supabase не успя да запише ключа. Нужна е проверка на базата данни.'};
+      showStatus('✕ '+(messages[error?.status]||'Неуспешна връзка със сървъра. Опитай по-късно.'));
     }finally{
       saving=false;button.disabled=false;
     }
