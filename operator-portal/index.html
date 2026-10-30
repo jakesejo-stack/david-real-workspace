@@ -122,6 +122,7 @@ async function displayState(){
        .order('created_at',{ascending:false}).limit(300);
       if(!historyError)history=data||[];
     }
+    let savedCount=0;
     const showFiltered=()=>{
       const q=el('company-search').value.trim().toLocaleLowerCase('bg-BG');
       let visible=0;
@@ -129,7 +130,7 @@ async function displayState(){
         card.hidden=!!q&&!card.dataset.search.includes(q);
         if(!card.hidden) visible++;
       });
-      el('company-count').textContent=visible+' от '+companies.length+' назначени фирми · Личен списък';
+      el('company-count').textContent=visible+' от '+(companies.length+savedCount)+' мои фирми (включително история)';
     };
     if(!companies.length)container.append(addText('div','Засега нямаш назначени фирми.','empty'));
     for(const c of companies){
@@ -189,6 +190,19 @@ async function displayState(){
         card.append(form);
       }
       container.append(card);
+    }
+    // Server-authorized, redacted prior contacts remain available after reassignment.
+    const {data:former,error:formerError}=await db.rpc('david_operator_private_company_history',{p_query:''});
+    if(!formerError&&Array.isArray(former)){
+     for(const c of former.filter(x=>!x.currently_assigned)){
+      const card=addText('article',null,'company');
+      card.dataset.search=[c.name,c.country,c.sector].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
+      card.append(addText('h3',c.name),addText('p',(c.country||'')+' · '+(c.sector||''),'meta'),
+        addText('p','Предишен контакт · Само твоя история · Няма достъп до текущ телефон','meta'));
+      for(const h of (c.my_history||[]).slice(0,15))
+       card.append(addText('p',new Date(h.created_at).toLocaleString('bg-BG')+' · '+h.outcome+(h.notes?' · '+h.notes:''),'meta'));
+      container.append(card);savedCount++;
+     }
     }
     showFiltered();
     await loadTasks();
