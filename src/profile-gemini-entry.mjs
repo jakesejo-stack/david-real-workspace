@@ -22,8 +22,8 @@ function mountProfile(panel){
  panel.replaceChildren(section);
  const form=section.querySelector('form'),status=section.querySelector('#david-profile-status');
  const set=(name,value)=>{form.elements.namedItem(name).value=value||''};
- request('GET','/api/david-ai-profile').then(data=>{const p=data.profile||{};for(const k of ['full_name','city','phone'])set(k,p[k]);set('gmail',data.verifiedEmail);}).catch(error=>{status.textContent=error.message;status.style.color='#b42318'});
- form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button');button.disabled=true;status.textContent='Записване...';try{await request('POST','/api/david-ai-profile',{full_name:form.elements.namedItem('full_name').value,city:form.elements.namedItem('city').value,phone:form.elements.namedItem('phone').value});status.textContent='✓ Профилът е запазен успешно в DAVID.';status.style.color='#167347'}catch(error){status.textContent=error.message;status.style.color='#b42318'}finally{button.disabled=false}});
+ request('GET','/api/david-personal').then(data=>{const p=data.profile||{};for(const k of ['full_name','city','phone'])set(k,p[k]);set('gmail',data.verifiedEmail);}).catch(error=>{status.textContent=error.message;status.style.color='#b42318'});
+ form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button');button.disabled=true;status.textContent='Записване...';try{await request('POST','/api/david-personal',{full_name:form.elements.namedItem('full_name').value,city:form.elements.namedItem('city').value,phone:form.elements.namedItem('phone').value});status.textContent='✓ Профилът е запазен успешно в DAVID.';status.style.color='#167347'}catch(error){status.textContent=error.message;status.style.color='#b42318'}finally{button.disabled=false}});
 }
 // Keep the original DAVID profile layout, but replace its blue Tasks CTA
 // with the Gemini setup workflow. No browser storage is used for API keys.
