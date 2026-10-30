@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {handleCallIntelligence} from '../src/server/david-live-calls.mjs';
+import {handleCallIntelligence,canAccessCallAudio} from '../src/server/david-live-calls.mjs';
 
 function mockResponse(){
  return {
@@ -37,3 +37,18 @@ test('recording callback requires signed Twilio callback',async()=>{
  await handleCallIntelligence({method:'POST',headers:{},body:{},query:{}},res,'live-recording-status');
  assert.equal(res.statusCode,403);
 });
+
+test('audio permissions are admin-only regardless of UI visibility',()=>{
+ assert.equal(canAccessCallAudio('worker'),false);
+ assert.equal(canAccessCallAudio('operator'),false);
+ assert.equal(canAccessCallAudio(undefined),false);
+ assert.equal(canAccessCallAudio('admin'),true);
+});
+for(const route of ['live-audio','call-outcome','company-history','admin-inbox','admin-mark-read']){
+ test(route+' rejects unauthenticated callers before DB access',async()=>{
+  const res=mockResponse();
+  await handleCallIntelligence({method:'GET',headers:{},query:{}},res,route);
+  assert.equal(res.statusCode,403);
+  assert.equal(res.body.error,'approved_active_google_member_required');
+ });
+}
