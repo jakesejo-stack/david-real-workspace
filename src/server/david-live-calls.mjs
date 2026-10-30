@@ -158,11 +158,13 @@ async function handleStop(req,res,a){
  try{
   if(scope==='transcription'){
    if(!s.transcription_consent_at||s.transcription_stopped_at)return response(res,409,{error:'transcription_not_running'});
-   if(s.transcription_sid)await client.calls(sid).transcriptions(s.transcription_sid).update({status:'stopped'});
+   if(!transOK(s.transcription_sid))return response(res,409,{error:'transcription_not_started'});
+   await client.calls(sid).transcriptions(s.transcription_sid).update({status:'stopped'});
   }else{
    if(!s.recording_consent_at||s.recording_stopped_at)return response(res,409,{error:'recording_not_running'});
    const {data:r}=await a.db.from('david_recordings').select('recording_sid').eq('call_sid',sid).order('created_at',{ascending:false}).limit(1).maybeSingle();
-   if(r?.recording_sid)await client.calls(sid).recordings(r.recording_sid).update({status:'stopped'});
+   if(!recOK(r?.recording_sid))return response(res,409,{error:'recording_not_started'});
+   await client.calls(sid).recordings(r.recording_sid).update({status:'stopped'});
   }
   const field=scope==='transcription'?'transcription_stopped_at':'recording_stopped_at';
   const {error}=await a.db.from('david_live_call_sessions').update({[field]:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('call_sid',sid).eq('worker_user_id',a.user.id);
