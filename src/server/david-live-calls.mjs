@@ -103,7 +103,7 @@ async function webhookTranscript(req,res){
  if(!sidOK(sid)||!transOK(tsid))return response(res,400,{error:'invalid_transcription_identifiers'});
  const db=serviceClient();
  const {data:s,error}=await db.from('david_live_call_sessions').select('*').eq('call_sid',sid).maybeSingle();
- if(error||!s||!s.transcription_consent_at)return response(res,403,{error:'consent_required'});
+ if(error||!s||!s.transcription_consent_at||s.transcription_stopped_at||process.env.DAVID_LIVE_TRANSCRIPTION_ENABLED!=='true')return response(res,403,{error:'transcription_not_authorized'});
  if(s.transcription_sid&&s.transcription_sid!==tsid)return response(res,409,{error:'transcription_session_mismatch'});
  const evt=String(b.TranscriptionEvent||'');
  if(evt==='transcription-started'){
@@ -144,6 +144,30 @@ async function recordingWebhook(req,res){
  if(!['in-progress','completed','absent'].includes(status))return response(res,400,{error:'invalid_recording_status'});
  const {error}=await db.from('david_recordings').upsert({recording_sid:rsid,call_sid:sid,status,consent_basis:'operator_attested_client_permission_v1'},{onConflict:'recording_sid'});
  return response(res,error?503:200,error?{error:'recording_storage_unavailable'}:{ok:true});
+}
+async function handleStop(req,res,a){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ const b=bodyOf(req),sid=String(b.call_sid||''),scope=b.scope;
+ if(!['transcription','recording'].includes(scope))return response(res,400,{error:'invalid_scope'});
+ const s=await ownedSession(a,sid);
+ if(!s)return response(res,404,{error:'call_not_found'});
+ if(s.worker_user_id!==a.user.id)return response(res,403,{error:'only_call_operator_can_stop'});
+ const account=process.env.TWILIO_ACCOUNT_SID,token=process.env.TWILIO_AUTH_TOKEN;
+ if(!account||!token)return response(res,503,{error:'twilio_not_configured'});
+ const client=twilio(account,token);
+ try{
+  if(scope==='transcription'){
+   if(!s.transcription_consent_at||s.transcription_stopped_at)return response(res,409,{error:'transcription_not_running'});
+   if(s.transcription_sid)await client.calls(sid).transcriptions(s.transcription_sid).update({status:'stopped'});
+  }else{
+   if(!s.recording_consent_at||s.recording_stopped_at)return response(res,409,{error:'recording_not_running'});
+   const {data:r}=await a.db.from('david_recordings').select('recording_sid').eq('call_sid',sid).order('created_at',{ascending:false}).limit(1).maybeSingle();
+   if(r?.recording_sid)await client.calls(sid).recordings(r.recording_sid).update({status:'stopped'});
+  }
+  const field=scope==='transcription'?'transcription_stopped_at':'recording_stopped_at';
+  const {error}=await a.db.from('david_live_call_sessions').update({[field]:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('call_sid',sid).eq('worker_user_id',a.user.id);
+  return response(res,error?503:200,error?{error:'stop_audit_unavailable'}:{stopped:true,scope});
+ }catch(error){console.warn('DAVID provider stop error',scope,error?.status||'unknown');return response(res,502,{error:'twilio_stop_failed'})}
 }
 async function handleConsent(req,res,a){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
@@ -226,12 +250,13 @@ async function audio(req,res,a){
 export async function handleCallIntelligence(req,res,action){
  if(action==='live-transcript')return webhookTranscript(req,res);
  if(action==='live-recording-status')return recordingWebhook(req,res);
- const supported=['call-records','call-detail','live-status','live-consent','live-audio'];
+ const supported=['call-records','call-detail','live-status','live-consent','live-stop','live-audio'];
  if(!supported.includes(action))return null;
  try{
   const a=await authorized(req);
   if(!a)return response(res,403,{error:'approved_active_google_member_required'});
   if(action==='live-consent')return handleConsent(req,res,a);
+  if(action==='live-stop')return handleStop(req,res,a);
   if(action==='live-audio')return audio(req,res,a);
   if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
   if(action==='call-records'){
@@ -242,14 +267,14 @@ export async function handleCallIntelligence(req,res,action){
    return response(res,200,{calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,recording_authorized:!!s.recording_consent_at,transcription_authorized:!!s.transcription_consent_at}))});
   }
   if(action==='live-status'){
-   let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
+   let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
    if(a.role!=='admin')q=q.eq('worker_user_id',a.user.id);
    const {data,error}=await q.maybeSingle();
    if(error)return response(res,503,{error:'live_status_unavailable'});
    if(!data)return response(res,200,{active:false});
    const {data:latest}=await a.db.from('david_live_coach_suggestions').select('suggestion,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
    const {data:line}=await a.db.from('david_live_transcript_segments').select('speaker,content,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
-   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,latest_customer_line:line?.speaker==='client'?line.content:null,suggestion:latest?.suggestion||null,suggestion_at:latest?.created_at});
+   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,transcription_active:!!data.transcription_consent_at&&!data.transcription_stopped_at,recording_active:!!data.recording_consent_at&&!data.recording_stopped_at,latest_customer_line:line?.speaker==='client'?line.content:null,suggestion:latest?.suggestion||null,suggestion_at:latest?.created_at});
   }
   const s=await ownedSession(a,req.query?.sid);
   if(!s)return response(res,404,{error:'call_not_found'});
