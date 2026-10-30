@@ -82,9 +82,12 @@ export async function companyDetail(db,companyId) {
  let current=null;
  if(company.currently_assigned){
   const {data,error}=await db.from('david_companies')
-   .select('city,research_notes,contact_name,contact_email,contact_phone')
+   .select('city,research_notes,contact_name,contact_email,contact_phone,calling_approved,do_not_call')
    .eq('id',companyId).eq('assigned_to',(await db.auth.getUser()).data.user?.id).maybeSingle();
-  if(!error)current=data;
+  if(!error&&data)current={...data,
+    contact_phone:data.calling_approved&&!data.do_not_call?data.contact_phone:null,
+    contact_email:data.calling_approved&&!data.do_not_call?data.contact_email:null
+  };
  }
  return {
   ok:true,
