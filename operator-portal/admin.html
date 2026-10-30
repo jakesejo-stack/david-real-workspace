@@ -77,6 +77,8 @@ async function refresh(){
  ]);
  const errors=[inv,mem,ids,companies,results].filter(x=>x.error).map(x=>x.error.message);
  if(errors.length){setStatus('Четене: '+errors.join(' | '));return}
+ const {data:summary,error:summaryError}=await db.rpc('david_admin_dashboard_snapshot');
+ const roster=new Map(summaryError?[]:(summary?.workers||[]).map(w=>[w.user_id,w.email]));
  const membership=new Map((mem.data||[]).map(m=>[m.user_id,m]));
  // Existing SECURITY DEFINER RPC rejects workers even if they bypass this UI.
  const {data:requests,error:requestError}=await db.rpc('david_admin_google_access_requests');
@@ -109,6 +111,7 @@ async function refresh(){
  const active=new Map((ids.data||[]).map(i=>[i.user_id,i.active]));
  const approvedWorkers=(mem.data||[]).filter(m=>m.role==='worker'&&active.get(m.user_id));
  const workerNames=new Map((inv.data||[]).filter(i=>i.linked_user_id).map(i=>[i.linked_user_id,i.email]));
+ for(const [userId,email] of roster)if(!workerNames.has(userId))workerNames.set(userId,email);
  const form=$('taskform');
  const operatorSelect=form.elements.namedItem('worker'),companySelect=form.elements.namedItem('company');
  const previouslySelected=operatorSelect.value,previousCompany=companySelect.value;
