@@ -29,7 +29,7 @@ export function validateApplication(input) {
 
 export async function submitApplication(db,input) {
  const p=validateApplication(input);
- const result=await rpc(db,'david_operator_submit_application',{
+ const result=await rpc(db,'david_operator_submit_profile',{
  p_full_name:p.name,p_country:p.country,p_languages:p.languages,p_phone:p.phone
  });
  if (result?.ok!==true) throw new Error('Кандидатурата не е записана.');
@@ -41,18 +41,20 @@ export async function adminApplications(db) {
  return result.requests;
 }
 export async function adminCreateCompanyTask(db,params) {
- const result=await rpc(db,'david_admin_create_company_task',{
- p_worker_user_id:params.workerId,p_company_id:params.companyId,
- p_title:params.title,p_description:params.description||'',
- p_priority:params.priority||'P2',p_due_at:params.dueAt||null
+ const {getApprovedWorkers,assignCompany,createWorkerTask}=await import('./admin-worker-picker.mjs');
+ const workers=await getApprovedWorkers(db);
+ if(!workers.some(w=>w.id===params.workerId))throw new Error('Неактивен оператор');
+ await assignCompany(db,workers,params.companyId,params.workerId);
+ const result=await createWorkerTask(db,workers,params.workerId,{
+   title:params.title,description:params.description||'',priority:params.priority||'P2',
+   dueAt:params.dueAt||null
  });
- if (result?.ok!==true) throw new Error('Задачата не е записана.');
  return result;
 }
 export async function myTasks(db) {
- const result=await rpc(db,'david_worker_my_tasks');
- if (!Array.isArray(result)) throw new Error('Невалиден списък със задачи');
- return result;
+ const result=await rpc(db,'david_my_task_board');
+ if (result?.ok!==true||!Array.isArray(result.tasks)) throw new Error('Невалиден списък със задачи');
+ return result.tasks;
 }
 export async function saveTaskContact(db,params) {
  if (!Object.hasOwn(OUTCOMES,params.outcome)) throw new Error('Невалиден резултат');
@@ -65,14 +67,33 @@ export async function saveTaskContact(db,params) {
  return result;
 }
 export async function myCompanies(db,search='') {
- const result=await rpc(db,'david_worker_my_companies',{p_query:String(search).slice(0,120)});
+ const result=await rpc(db,'david_operator_private_company_history',{p_query:String(search).slice(0,120)});
  if (!Array.isArray(result)) throw new Error('Невалиден списък с фирми');
- return result;
+ return result.map(c=>({
+  ...c,company_name:c.name,my_contact_count:c.my_contact_count||0,
+  last_outcome:c.my_history?.[0]?.outcome||null
+ }));
 }
 export async function companyDetail(db,companyId) {
- const result=await rpc(db,'david_worker_company_detail',{p_company_id:companyId});
- if(result?.ok!==true) throw new Error('Нямаш достъп до тази фирма');
- return result;
+ const companies=await myCompanies(db);
+ const company=companies.find(c=>c.company_id===companyId);
+ if(!company)throw new Error('Нямаш достъп до тази фирма');
+ // Expose currently assigned company contact ONLY through RLS; never for former assignments.
+ let current=null;
+ if(company.currently_assigned){
+  const {data,error}=await db.from('david_companies')
+   .select('city,research_notes,contact_name,contact_email,contact_phone,calling_approved,do_not_call')
+   .eq('id',companyId).eq('assigned_to',(await db.auth.getUser()).data.user?.id).maybeSingle();
+  if(!error&&data)current={...data,
+    contact_phone:data.calling_approved&&!data.do_not_call?data.contact_phone:null,
+    contact_email:data.calling_approved&&!data.do_not_call?data.contact_email:null
+  };
+ }
+ return {
+  ok:true,
+  company:{...company,...(current||{})},tasks:[],
+  my_history:company.my_history||[]
+ };
 }
 
 function el(doc,tag,text='',attrs={}) {
@@ -212,7 +233,7 @@ export async function mountWorkerTasks(container,db,afterSave=()=>{}) {
 
 export async function mountMyCompanies(container,db) {
  const d=container.ownerDocument;
- container.replaceChildren(el(d,'h2','Моите фирми / Company Info'));
+ container.replaceChildren(el(d,'h2','Моите фирми'));
  const search=field(d,'Търси по фирма, държава или сектор','search');
  const list=el(d,'section'),detail=el(d,'section');
  container.append(search.box,list,detail);
@@ -224,7 +245,7 @@ export async function mountMyCompanies(container,db) {
    const rows=await myCompanies(db,search.input.value);
    if(requestId!==request)return;
    list.replaceChildren();
-   if(!rows.length)list.append(el(d,'p','Няма фирми в твоята история.'));
+   if(!rows.length)list.append(el(d,'p','Няма фирми, по които си работил. Те се запазват тук след отчетен контакт от задача.'));
    for(const c of rows){
     const button=el(d,'button',c.company_name+' — '+c.country+
      ' · Мои контакти: '+c.my_contact_count+
@@ -237,11 +258,11 @@ export async function mountMyCompanies(container,db) {
  }
 
  async function openDetail(companyId){
-  detail.replaceChildren(el(d,'p','Зареждане на Company Info...'));
+  detail.replaceChildren(el(d,'p','Зареждане на фирмата...'));
   try{
    const result=await companyDetail(db,companyId);
    const info=result.company;
-   detail.replaceChildren(el(d,'h3',info.name));
+   detail.replaceChildren(el(d,'h3',info.company_name||info.name));
    for(const [label,value] of [
     ['Държава',info.country],['Град',info.city],['Сектор',info.sector],
     ['Информация',info.research_notes],['Контакт',info.contact_name],
@@ -263,4 +284,70 @@ export async function mountMyCompanies(container,db) {
  search.input.addEventListener('input',run);
  await run();
  return {refresh:run};
+}
+
+// Admin-only summary. The database enforces authorization/RLS; never fetch other
+// workers' history into a worker session. A note is not an audio transcript.
+export async function mountAdminActivity(container,db) {
+ const d=container.ownerDocument;
+ container.replaceChildren(el(d,'h2','Оператори, фирми и история на контактите'));
+ const search=field(d,'Търси оператор, фирма, държава или бележка','search');
+ const status=el(d,'p','Зареждане...'),result=el(d,'section');
+ container.append(search.box,status,result);
+ let entries=[];
+ try {
+  const [members,companies,interactions]=await Promise.all([
+   db.from('david_members').select('user_id,role,display_name').limit(500),
+   db.from('david_companies').select('id,company_name,country,assigned_to').limit(5000),
+   db.from('david_company_interactions').select('id,company_id,worker_user_id,outcome,notes,created_at,source,followup_at').order('created_at',{ascending:false}).limit(2000)
+  ]);
+  // A missing/new interaction table must not blank the worker/company roster.
+  for(const x of [members,companies])if(x.error)throw x.error;
+  const historyUnavailable=!!interactions.error;
+  let legacy=[];
+  if(historyUnavailable){
+   const manual=await db.from('david_manual_contact_results')
+    .select('id,company_id,worker_user_id,outcome,notes,created_at,followup_at')
+    .order('created_at',{ascending:false}).limit(2000);
+   if(!manual.error)legacy=(manual.data||[]).map(x=>({...x,source:'manual_operator_report'}));
+  }
+  const people=new Map((members.data||[]).map(x=>[x.user_id,x]));
+  const firms=new Map((companies.data||[]).map(x=>[x.id,x]));
+  entries=(historyUnavailable?legacy:(interactions.data||[])).map(x=>({
+   ...x,worker:people.get(x.worker_user_id),company:firms.get(x.company_id)
+  }));
+  status.textContent='Оператори: '+(members.data||[]).filter(x=>x.role==='worker').length+
+   ' · Фирми: '+firms.size+' · Записани операторски отчети: '+entries.length+
+   ' (не са аудиозаписи или автоматична транскрипция).'+
+   (historyUnavailable?' · Показвам наличните ръчни отчети от старото CRM.':'')+'';
+  const roster=el(d,'section');roster.className='card';container.insertBefore(roster,result);
+  roster.append(el(d,'h3','Всички оператори'));
+  for(const p of (members.data||[]).filter(x=>x.role==='worker')){
+   const assigned=(companies.data||[]).filter(c=>c.assigned_to===p.user_id).length;
+   const worked=entries.filter(e=>e.worker_user_id===p.user_id).length;
+   roster.append(el(d,'p',(p.display_name||p.user_id)+' · Назначени фирми: '+assigned+' · Отчети: '+worked));
+  }
+  roster.append(el(d,'h3','Всички фирми'));
+  for(const c of (companies.data||[])){
+   const owner=people.get(c.assigned_to);
+   roster.append(el(d,'p',(c.company_name||c.id)+' · '+(c.country||'')+
+    ' · Оператор: '+(owner?.display_name||'Неназначена')));
+  }
+  const render=()=>{
+   const q=search.input.value.trim().toLocaleLowerCase('bg-BG');
+   const rows=entries.filter(x=>[x.worker?.display_name,x.company?.company_name,x.company?.country,x.notes,x.outcome]
+    .some(v=>String(v||'').toLocaleLowerCase('bg-BG').includes(q)));
+   result.replaceChildren();
+   for(const x of rows.slice(0,250)){
+    const card=el(d,'article');card.className='company';
+    card.append(el(d,'strong',(x.worker?.display_name||x.worker_user_id)+' · '+(x.company?.company_name||x.company_id)));
+    card.append(el(d,'p',new Date(x.created_at).toLocaleString('bg-BG')+' · '+(OUTCOMES[x.outcome]||x.outcome)));
+    if(x.notes)card.append(el(d,'p','Отчет на оператора: '+x.notes));
+    if(x.followup_at)card.append(el(d,'p','Следващ контакт: '+new Date(x.followup_at).toLocaleString('bg-BG')));
+    result.append(card);
+   }
+   if(!rows.length)result.append(el(d,'p','Няма записани контакти по тази търсачка.'));
+  };
+  search.input.addEventListener('input',render);render();
+ }catch(e){status.textContent='Администраторският отчет е недостъпен: '+String(e?.message||e)}
 }

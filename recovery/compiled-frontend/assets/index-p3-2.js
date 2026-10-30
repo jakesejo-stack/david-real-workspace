@@ -80,7 +80,7 @@ function davidPendingGoogle(status){
   g.davidPendingCleanup=()=>clearInterval(timer);
  }
 }
-function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class="brand">◇ DAVID<i>.</i></div><p class="brand-sub">SOULFLAME SYSTEMS</p><h2>Вход в DPP Call Center</h2><p class="muted">Google вход за одобрени оператори и администратори.</p><button id="googleLogin" class="btn primary" style="width:100%">Продължи с Google</button><p class="tiny" style="margin-top:15px">Администраторските права се проверяват в Supabase, не от браузъра.</p></div>',N("googleLogin").onclick=async()=>{try{const{error:e}=await g.db.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+"/"}});if(e)throw e}catch(e){ye(e)}}}function nn(t=""){N("root").innerHTML='<div class="login card"><h2>DAVID: изчакваш активиране</h2><p class="muted">Входът с Google е успешен, но нямаш активна Worker или Admin роля. Администраторът може да активира акаунта ти.</p><p class="tiny">'+I(t)+'</p><button class="btn" id="logout">Изход</button></div>',N("logout").onclick=async()=>{await g.db.auth.signOut(),location.reload()}}function au(){const t=[["tasks","☷ ЗАДАЧИ"],["mycompanies","▤ Моите фирми"],["companies","▦ Company Info"],["desk","☎ Live Call Desk"],["records","▤ Call Records"],["general","ⓘ General Info"],["profile","✓ Google профил"],["support","🛠 Support Tickets"]];g.role==="admin"&&t.push(["admin","⚙ Admin Panel"]);const e=t.map(([s,i])=>'<button type="button" data-nav="'+s+'">'+I(i)+"</button>").join("");N("root").innerHTML='<div class="layout"><aside class="side"><div class="brand">◇ DAVID<i>.</i></div><div class="brand-sub">SOULFLAME SYSTEMS</div><div class="nav" id="sidenav">'+e+'</div></aside><div class="page"><div class="top"><span class="chip green">● DB CONNECTED</span><span class="chip '+(g.config.telephonyConfigured?"green":"amber")+'">'+(g.config.telephonyConfigured?"☎ TWILIO CONNECTED":"☎ TWILIO НЕ Е НАСТРОЕН")+'</span><span class="chip">'+I(g.user.email)+" · "+(g.role==="admin"?"Admin":"Worker")+'</span><button class="btn subtle" id="logout">Изход</button></div><main class="main" id="content"></main></div></div><nav class="mobile-nav" id="mobilenav">'+e+"</nav>",N("logout").onclick=async()=>{g.call&&g.call.disconnect(),await g.db.auth.signOut(),location.reload()},document.querySelectorAll("[data-nav]").forEach(s=>s.onclick=()=>{const i=s.dataset.nav;i==="admin"&&g.role!=="admin"||(g.view=i,ct())})}function ct(){if(g.view!=="tasks"&&g.davidTaskWaitCleanup){g.davidTaskWaitCleanup();g.davidTaskWaitCleanup=null}if(g.view!=="tasks"&&g.davidTaskUnmount){g.davidTaskUnmount();g.davidTaskUnmount=null}if(g.role){if(document.querySelectorAll("[data-nav]").forEach(t=>t.classList.toggle("active",t.dataset.nav===g.view)),g.view==="tasks")return davidTaskPage();if(g.view==="mycompanies")return davidMyCompaniesPage();if(g.view==="companies")return De();if(g.view==="desk")return Ue();if(g.view==="records")return pu();if(g.view==="general")return gu();if(g.view==="profile")return davidWorkerLinkPage();if(g.view==="support")return davidSupportInboxPage();if(g.view==="admin"&&g.role==="admin"){
+function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class="brand">◇ DAVID<i>.</i></div><p class="brand-sub">SOULFLAME SYSTEMS</p><h2>Вход в DPP Call Center</h2><p class="muted">Google вход за одобрени оператори и администратори.</p><button id="googleLogin" class="btn primary" style="width:100%">Продължи с Google</button><p class="tiny" style="margin-top:15px">Администраторските права се проверяват в Supabase, не от браузъра.</p></div>',N("googleLogin").onclick=async()=>{try{const{error:e}=await g.db.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+"/"}});if(e)throw e}catch(e){ye(e)}}}function nn(t=""){N("root").innerHTML='<div class="login card"><h2>DAVID: изчакваш активиране</h2><p class="muted">Входът с Google е успешен, но нямаш активна Worker или Admin роля. Администраторът може да активира акаунта ти.</p><p class="tiny">'+I(t)+'</p><button class="btn" id="logout">Изход</button></div>',N("logout").onclick=async()=>{await g.db.auth.signOut(),location.reload()}}function au(){const t=[["tasks","☷ ЗАДАЧИ"],["mycompanies","▤ Моите фирми"],["desk","☎ Live Call Desk"],["records","▤ Call Records"],["general","ⓘ General Info"],["profile","✓ Google профил"],["support","🛠 Support Tickets"]];g.role==="admin"&&t.push(["admin","⚙ Admin Panel"]);const e=t.map(([s,i])=>'<button type="button" data-nav="'+s+'">'+I(i)+"</button>").join("");N("root").innerHTML='<div class="layout"><aside class="side"><div class="brand">◇ DAVID<i>.</i></div><div class="brand-sub">SOULFLAME SYSTEMS</div><div class="nav" id="sidenav">'+e+'</div></aside><div class="page"><div class="top"><span class="chip green">● DB CONNECTED</span><span class="chip '+(g.config.telephonyConfigured?"green":"amber")+'">'+(g.config.telephonyConfigured?"☎ TWILIO CONNECTED":"☎ TWILIO НЕ Е НАСТРОЕН")+'</span><span class="chip">'+I(g.user.email)+" · "+(g.role==="admin"?"Admin":"Worker")+'</span><button class="btn subtle" id="logout">Изход</button></div><main class="main" id="content"></main></div></div><nav class="mobile-nav" id="mobilenav">'+e+"</nav>",N("logout").onclick=async()=>{g.call&&g.call.disconnect(),await g.db.auth.signOut(),location.reload()},document.querySelectorAll("[data-nav]").forEach(s=>s.onclick=()=>{const i=s.dataset.nav;i==="admin"&&g.role!=="admin"||(g.view=i,ct())})}function ct(){if(g.view!=="tasks"&&g.davidTaskWaitCleanup){g.davidTaskWaitCleanup();g.davidTaskWaitCleanup=null}if(g.view!=="tasks"&&g.davidTaskUnmount){g.davidTaskUnmount();g.davidTaskUnmount=null}if(g.role){if(document.querySelectorAll("[data-nav]").forEach(t=>t.classList.toggle("active",t.dataset.nav===g.view)),g.view==="tasks")return davidTaskPage();if(g.view==="mycompanies")return davidMyCompaniesPage();if(g.view==="companies"){g.view="mycompanies";return davidMyCompaniesPage()}if(g.view==="desk")return Ue();if(g.view==="records")return pu();if(g.view==="general")return gu();if(g.view==="profile")return davidWorkerLinkPage();if(g.view==="support")return davidSupportInboxPage();if(g.view==="admin"&&g.role==="admin"){
  const page=N("content");if(!page)return;
  page.innerHTML='<div class="card" role="status"><h1>Admin Panel</h1><p class="muted">Зареждам администраторския панел…</p></div>';
  try{mu()}catch(err){
@@ -89,6 +89,13 @@ function zn(){const t=N("root");t.innerHTML='<div class="login card"><div class=
   page.innerHTML='<h1>Admin Panel</h1><div class="card warning" role="alert"><h2>CRM данните не се заредиха</h2><p>'+reason+'</p><button class="btn" id="davidAdminRetry" type="button">↻ Опитай отново</button></div>';
   N("davidAdminRetry")?.addEventListener("click",()=>{if(g.view==="admin")ct()});
  }
+ Promise.resolve().then(async()=>{
+  if(g.role!=="admin"||g.view!=="admin")return;
+  const holder=document.createElement("section");holder.className="card";holder.id="davidAdminAllActivity";
+  N("content")?.append(holder);
+  const mod=await import("/david-modules/operator-company-workflows.mjs");
+  if(holder.isConnected&&g.role==="admin")await mod.mountAdminActivity(holder,g.db);
+ }).catch(err=>console.warn("[DAVID] Admin activity unavailable",err));
  return Promise.resolve().then(()=>davidPendingAdminPanel()).catch(err=>{
   console.error("[DAVID] Google approvals panel failed",err);
   if(g.view!=="admin")return;
@@ -156,24 +163,32 @@ async function davidTaskPage(){
 }
 
 function davidMyCompaniesPage(){
+ // Always render an immediately usable search from the existing scoped CRM.
+ // Enhanced, persistent history takes over only when the secure RPC is available.
  if(g.role==="worker"&&g.db){
   import("/david-modules/operator-company-workflows.mjs").then(async m=>{
    await m.myCompanies(g.db);
    if(g.view!=="mycompanies")return;
    const page=N("content");if(!page||document.getElementById("davidMitkoMyCompanies"))return;
-   const extra=document.createElement("section");extra.className="card";extra.id="davidMitkoMyCompanies";page.prepend(extra);
+   const extra=document.createElement("section");extra.className="card";extra.id="davidMitkoMyCompanies";
+   page.prepend(extra);
    await m.mountMyCompanies(extra,g.db);
-  }).catch(err=>console.info("[DAVID] History awaits SQL 016–018",err?.message||err));
+   if(extra.isConnected){
+    const legacy=N("myCompanyLegacyResults");if(legacy)legacy.hidden=true;
+   }
+  }).catch(err=>console.info("[DAVID] Private history RPC is not yet installed; using existing worker-scoped CRM search",err?.message||err));
  }
  const mine=(g.companies||[]).filter(c=>c.assigned_to===g.user?.id);
  const results=g.manualResults||[];
  const labels={no_answer:"Неотговорено",declined:"Отказ",interested:"Има интерес",callback:"Обратно обаждане",do_not_contact:"Без повече контакт"};
- let html=Ct("Моите фирми","Само фирмите, назначени от Admin. Ръчните контакти се записват отделно от Twilio, без измислен CallSid.");
+ let html=Ct("Моите фирми","Търси фирми от задачите и своята история. Отчетите са лични за оператора; администраторите виждат екипния отчет.");
+ html+='<div class="card"><label><strong>🔎 Търсене в Моите фирми</strong><input id="myCompanySearch" class="field" type="search" placeholder="Име на фирма, държава или сектор" autocomplete="off"></label><p id="myCompanySearchCount" class="tiny" role="status">Зареждане на резултати...</p></div>';
+ html+='<div id="myCompanyLegacyResults">';
  html+='<div class="card"><div class="row"><h2>Моите B2B фирми</h2><span class="tag">'+mine.length+' назначения</span><button id="myCompaniesReload" class="btn">↻ Обнови</button></div><p class="tiny">Контактувай само от разрешен служебен телефон, след законна проверка и при липса на възражение. Тук не се извършват обаждания.</p></div>';
  html+=mine.length?mine.map(c=>{
   const approved=!!c.calling_approved&&!c.do_not_call&&/^\+[1-9][0-9]{5,14}$/.test(c.contact_phone||"")&&String(c.contact_source||"").trim().length>=5;
   const history=results.filter(r=>r.company_id===c.id).slice(0,6);
-  return '<section class="card"><div class="row"><h2>'+I(c.company_name)+'</h2><span class="tag '+(approved?"green":"orange")+'">'+(approved?"Разрешен ръчен контакт":"Не е одобрен за контакт")+'</span></div>'
+  return '<section class="card" data-my-company-search="'+I([c.company_name,c.country,c.city,c.sector].filter(Boolean).join(" ").toLocaleLowerCase("bg-BG"))+'"><div class="row"><h2>'+I(c.company_name)+'</h2><span class="tag '+(approved?"green":"orange")+'">'+(approved?"Разрешен ръчен контакт":"Не е одобрен за контакт")+'</span></div>'
    +'<div class="fields"><div><small>Държава / Град</small><strong>'+I(c.country||"—")+' / '+I(c.city||"—")+'</strong></div><div><small>Сектор</small><strong>'+I(c.sector||"—")+'</strong></div>'
    +'<div><small>Служебен телефон</small><strong>'+(approved?I(c.contact_phone):"Не е разрешен за показване/контакт")+'</strong></div><div><small>Източник на контакта</small><strong>'+I(c.contact_source||"Не е документиран")+'</strong></div></div>'
    +'<p class="tiny">Задача: '+I(c.task||"Няма зададена")+'</p>'
@@ -188,7 +203,17 @@ function davidMyCompaniesPage(){
    +'<div style="margin-top:14px"><h3>История на ръчните действия</h3>'
    +(history.length?history.map(r=>'<p class="tiny"><b>'+I(labels[r.outcome]||r.outcome)+'</b> · '+I(js(r.created_at))+(r.notes?' · '+I(r.notes):'')+'</p>').join(""):'<p class="tiny">Все още няма записан ръчен контакт.</p>')+'</div></section>';
  }).join(""):'<div class="card"><p class="muted">Няма назначени фирми. Администраторът може да ги разпредели от Admin Panel → Фирми.</p></div>';
+ html+='</div>';
  N("content").innerHTML=html;
+ const find=N("myCompanySearch"),counter=N("myCompanySearchCount");
+ const filterMine=()=>{const q=(find?.value||"").trim().toLocaleLowerCase("bg-BG");let shown=0;
+  document.querySelectorAll("[data-my-company-search]").forEach(el=>{
+   el.hidden=!!q&&!String(el.getAttribute("data-my-company-search")||"").includes(q);
+   if(!el.hidden)shown++;
+  });
+  if(counter)counter.textContent=shown+" фирми · личен списък";
+ };
+ if(find)find.addEventListener("input",filterMine);filterMine();
  N("myCompaniesReload").onclick=()=>Pe();
  document.querySelectorAll("[data-manual-save]").forEach(button=>button.onclick=async()=>{
   const id=button.dataset.manualSave;
