@@ -14,7 +14,8 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   const field=node('input');field.id=label.htmlFor;field.type='password';field.autocomplete='off';
   field.spellcheck=false;field.placeholder='Постави ключа тук';field.className='field';
   const button=node('button','Запиши');button.type='button';button.className='btn primary';
-  const status=node('p');status.setAttribute('role','status');
+  const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.style.fontWeight='700';status.style.marginTop='12px';
+  const showStatus=(message,success=false)=>{status.textContent=message;status.style.color=success?'#167347':'#b42318';};
   const entry=node('div');entry.style.display='flex';entry.style.gap='10px';entry.style.alignItems='center';entry.style.flexWrap='wrap';
   field.style.flex='1 1 260px';field.style.width='auto';button.style.flex='0 0 auto';
   entry.append(field,button);section.append(label,entry);
@@ -27,14 +28,15 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   button.addEventListener('click',async()=>{
     if(saving)return;
     const key=field.value.trim();
-    if(!/^AIza[\w-]{20,}$/.test(key)){status.textContent='Провери Gemini API ключа.';return;}
-    saving=true;button.disabled=true;status.textContent='Запазване...';
+    if(!/^AIza[\w-]{20,}$/.test(key)){showStatus('✕ Ключът не е записан. Постави валиден Gemini API ключ, започващ с AIza.');return;}
+    saving=true;button.disabled=true;status.style.color='#555';status.textContent='Запазване...';
     try{
-      await saveKey(key);
+      const result=await saveKey(key);
+      if(result?.saved!==true)throw Error('Save not confirmed');
       field.value='';
-      status.textContent='Gemini API ключът е синхронизиран с текущия Google профил.';
+      showStatus('✓ Готово! Gemini API ключът е запазен успешно и е свързан с този Google профил.',true);
     }catch{
-      status.textContent='Запазването не успя. Опитай отново.';
+      showStatus('✕ Ключът не е записан. Провери достъпа и опитай отново.');
     }finally{
       saving=false;button.disabled=false;
     }
@@ -42,9 +44,9 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   if(typeof getConnection==='function')Promise.resolve().then(()=>getConnection()).then(s=>{
     // Do not overwrite a more recent save result with stale connection status.
     if(!saving&&!field.value&&status.textContent==='') {
-      status.textContent=s?.connected?'Gemini е свързан с този профил.':'Gemini още не е свързан.';
+      showStatus(s?.connected?'✓ Готово! Gemini е свързан с този Google профил.':'Gemini още не е свързан. Добави ключ и натисни „Запиши“.',!!s?.connected);
     }
   }).catch(()=>{
-    if(!saving&&status.textContent==='')status.textContent='Не може да се провери връзката.';
+    if(!saving&&status.textContent==='')showStatus('Не може да се провери дали Gemini е свързан.');
   });
 }
