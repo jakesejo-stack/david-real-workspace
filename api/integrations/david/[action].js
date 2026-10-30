@@ -8,9 +8,10 @@ import {approvedGoogleUser} from '../../_david_link_shared.js';
 const taskConfigKeys=['SUPABASE_SERVICE_ROLE_KEY','TWILIO_ACCOUNT_SID','TWILIO_API_KEY_SID','TWILIO_API_KEY_SECRET','TWILIO_AUTH_TOKEN','TWILIO_TASK_TWIML_APP_SID','TWILIO_FROM_NUMBER','PUBLIC_ORIGIN','DPP_TASK_ALLOWED_NUMBERS'];
 const taskReady=()=>process.env.LIVE_CALLS_ENABLED==='true'&&taskConfigKeys.every(k=>!!process.env[k]);
 const dialDay=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Europe/Sofia',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return v.year+'-'+v.month+'-'+v.day;};
-const bgNumber=s=>{const t=String(s||'').replace(/[ .()-]/g,'');return /^\+359\d{9}$/.test(t)?t:/^0\d{9}$/.test(t)?'+359'+t.slice(1):null;};
-const getTaskNumber=task=>{const found=(String(task?.instructions||'')+' '+String(task?.title||'')).match(/\+359\d{9}|(?<!\d)0\d{9}(?!\d)/);return found?bgNumber(found[0]):null;};
-const permittedNumber=n=>!!n&&(process.env.DPP_TASK_ALLOWED_NUMBERS||'').split(',').map(v=>bgNumber(v)).includes(n);
+// International E.164 numbers require exact admin allowlisting; never trust caller-provided numbers.
+const approvedPhone=s=>{const t=String(s||'').replace(/[ .()-]/g,'');return /^\+[1-9]\d{7,14}$/.test(t)?t:/^0\d{9}$/.test(t)?'+359'+t.slice(1):null;};
+const getTaskNumber=task=>{const found=(String(task?.instructions||'')+' '+String(task?.title||'')).match(/\+[1-9]\d{7,14}|(?<!\d)0\d{9}(?!\d)/);return found?approvedPhone(found[0]):null;};
+const permittedNumber=n=>!!n&&(process.env.DPP_TASK_ALLOWED_NUMBERS||'').split(',').map(v=>approvedPhone(v)).includes(n);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const callSidPattern=/^CA[0-9a-f]{32}$/i;
 const callbackUrl=action=>String(process.env.PUBLIC_ORIGIN||'').replace(/\/$/,'')+'/api/integrations/david/'+action;
