@@ -53,11 +53,15 @@ a{color:#e7b96b}.footer{margin-top:32px;color:#8e8782;font-size:12px}
 </div>
 <div id="desk" hidden>
 <div class="info"><span class="pill" id="role">ОПЕРАТОР</span><span class="user" id="expires"></span></div>
-<h2>Моите фирми</h2>
+<div class="line" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"><button type="button" id="tab-tasks" class="secondary">☷ Задачи</button><button type="button" id="tab-companies" class="secondary">▤ Моите фирми</button><button type="button" id="tab-calls" class="secondary">☎ Обаждания</button></div>
+<div id="view-tasks" hidden><h2>Назначени задачи</h2><p class="meta">Само възложените лично на теб задачи. Промяната на статуса се записва в CRM.</p><div id="tasks-list" class="panel-list"></div></div>
+<div id="view-companies"><h2>Моите фирми</h2>
 <label for="company-search">🔎 Търсачка в Моите фирми</label>
 <input id="company-search" type="search" placeholder="Търси фирма, държава или сектор" autocomplete="off" style="letter-spacing:normal">
 <p class="note" id="company-count" role="status" style="margin-top:10px">Само назначените на теб фирми</p>
 <div class="grid" id="companies"></div>
+</div>
+<div id="view-calls" hidden><h2>Обаждания</h2><p class="note">Реалните браузърни обаждания през Twilio още не са активирани. Не се отчита разговор при натискане на бутон. Разрешеният ръчен контакт и неговият отчет остават във фирмения CRM.</p><div class="company">☎ Start Call се активира само след валидиран Twilio акаунт, телефонен номер и успешно тестово обаждане.</div></div>
 <div class="actions"><button type="button" class="secondary" id="refresh">Обнови</button><button type="button" class="subtle" id="lock">Заключи сесията</button></div>
 </div>
 </div>
@@ -176,12 +180,21 @@ async function displayState(){
       container.append(card);
     }
     showFiltered();
-    msg('Служебната сесия е активна. Търсачката и личната история са само за твоите назначени фирми.');
+    await loadTasks();
+    chooseTab(window.__dppTab||'tasks');
+    msg('Служебната сесия е активна. Задачите и фирмите са ограничени до твоя профил.');
   }else{
     const approved=snapshot?.reason==='code_required';
     show('activation',approved);show('desk',false);
-    if(snapshot?.reason==='not_approved')
-      msg('Влязъл си като '+(currentUser.email||'непознат акаунт')+', но този профил НЕ е одобрен за DPP. Натисни „Изход от Google“, после „Избери Google акаунт“ и влез с одобрения профил от Call Desk.',true);
+    if(snapshot?.reason==='not_approved'){
+      // Verified Google owner/admin controls approval. A request never grants worker access.
+      const {data:request,error:requestError}=await db.rpc('david_google_enter_workspace');
+      if(requestError)msg('Заявката за регистрация е неуспешна: '+requestError.message,true);
+      else if(request?.status==='pending')msg('Google заявката за '+(currentUser.email||'този акаунт')+' е изпратена. Изчакай одобрение от администратор.');
+      else if(request?.status==='rejected')msg('Заявката е отказана. Свържи се с администратор.',true);
+      else if(request?.status==='blocked')msg('Този акаунт е блокиран.',true);
+      else msg('Акаунтът очаква администраторско одобрение.');
+    }
     else if(approved)msg('Акаунтът е одобрен. Генерирай НОВ код от Call Desk със същия Google профил и го въведи тук.');
     else msg('Достъпът още не е разрешен. Свържи се с администратора.',true);
   }
@@ -214,6 +227,41 @@ el('codeform').addEventListener('submit',async e=>{
   if(!data?.ok){msg(data?.reason==='rate_limited'?'Прекалено много опити. Опитай по-късно.':'Невалиден, изтекъл, използван или чужд код.',true);return}
   await displayState();
 });
+const chooseTab=(tab)=>{
+ const key=['tasks','companies','calls'].includes(tab)?tab:'tasks';
+ window.__dppTab=key;
+ for(const type of ['tasks','companies','calls']){
+  el('view-'+type).hidden=type!==key;
+  el('tab-'+type).disabled=type===key;
+ }
+};
+for(const tab of ['tasks','companies','calls'])el('tab-'+tab).addEventListener('click',()=>chooseTab(tab));
+async function loadTasks(){
+ const holder=el('tasks-list');holder.replaceChildren();
+ const {data,error}=await db.rpc('david_my_task_board');
+ if(error||!data?.ok){
+  holder.append(addText('p','Задачите не са налични: '+(error?.message||'проверка на правата'),'meta'));return
+ }
+ const tasks=Array.isArray(data.tasks)?data.tasks:[];
+ if(!tasks.length)holder.append(addText('p','Няма назначени задачи.','empty'));
+ for(const task of tasks){
+  const card=addText('article',null,'company');
+  card.append(addText('h3',task.title),addText('p',task.description||'','meta'));
+  card.append(addText('p','Приоритет: '+task.priority+' · Срок: '+(task.due_at?new Date(task.due_at).toLocaleString('bg-BG'):'Няма'),'meta'));
+  const select=document.createElement('select');select.setAttribute('aria-label','Статус на задача');
+  for(const key of ['TODO','IN_PROGRESS','BLOCKED','REVIEW','DONE'])select.append(new Option(key,key));
+  select.value=task.status;
+  const save=document.createElement('button');save.textContent='Запази статуса';save.style.marginTop='8px';
+  const feedback=addText('p','','meta');
+  save.addEventListener('click',async()=>{
+   save.disabled=true;
+   const {data:res,error:err}=await db.rpc('david_update_assignment_status',{p_task_id:task.id,p_status:select.value});
+   save.disabled=false;
+   feedback.textContent=err?'Грешка: '+err.message:res?.ok?'Статусът е записан.':'Статусът не е потвърден.';
+  });
+  card.append(select,save,feedback);holder.append(card);
+ }
+}
 el('company-search').addEventListener('input',()=>{
  const q=el('company-search').value.trim().toLocaleLowerCase('bg-BG');
  let visible=0;
