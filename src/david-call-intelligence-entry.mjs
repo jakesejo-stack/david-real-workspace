@@ -84,7 +84,7 @@ async function openCall(sid,trigger){
      const resp=await fetch('/api/integrations/david/live-audio?'+new URLSearchParams({sid,recording_sid:records[0].recording_sid}),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
      if(!resp.ok){const err=await resp.json().catch(()=>({}));throw Error(err.error||'Аудиото не е достъпно');}
      const blob=await resp.blob();if(playerBlob)URL.revokeObjectURL(playerBlob);
-     await callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_sid:sid,kind:'audio'})});
+     callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_sid:sid,kind:'audio'})}).catch(()=>{});
      playerBlob=URL.createObjectURL(blob);const audio=node('audio','');audio.controls=true;audio.preload='none';audio.src=playerBlob;audio.style.width='100%';holder.replaceChildren(audio);
     }catch(error){holder.textContent=error.message}finally{playButton.disabled=false}
    });
