@@ -225,7 +225,7 @@ async function handleDppTasks(req,res,action){
 export default async function handler(req,res){
  const action=req.query?.action;
  if(action==='task-dial-finished')return handleTaskDialFinished(req,res);
- if(['call-records','call-detail','live-status','live-consent','live-audio','live-transcript','live-recording-status'].includes(action))return handleCallIntelligence(req,res,action);
+ if(['call-records','call-detail','live-status','live-consent','live-stop','live-audio','live-transcript','live-recording-status'].includes(action))return handleCallIntelligence(req,res,action);
  if(typeof action==='string'&&action.startsWith('tasks-'))return handleDppTasks(req,res,action.slice(6));
  if(action==='tryout-voice'){
   if(!['GET','POST'].includes(req.method))return response(res,405,{error:'method_not_allowed'});
