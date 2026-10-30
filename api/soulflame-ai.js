@@ -28,29 +28,30 @@ export default async function handler(req,res){
   apiKey=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]).toString('utf8');
  }catch{return res.status(503).json({error:'Saved Gemini key cannot be decrypted; reconnect it in Google profile'});}
  try{
-  // Avoid a slow models-list request on every message. Use stable text-only models.
-  const models=['models/gemini-2.5-flash-lite','models/gemini-2.5-flash'];
+  const listing=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',{headers:{'x-goog-api-key':apiKey},signal:AbortSignal.timeout(8000)});
+  const listed=await listing.json().catch(()=>({}));
+  if(!listing.ok)return res.status(502).json({error:'Gemini model discovery failed (Google HTTP '+listing.status+').'});
+  const names=(listed.models||[]).filter(m=>m.supportedGenerationMethods?.includes('generateContent')).map(m=>m.name).filter(n=>/^models\/gemini-/.test(n)&&!/(tts|audio|speech|image|video|live|embedding|robotics|preview|experimental|exp-|computer-use)/i.test(n));
+  const priority=['models/gemini-2.5-flash-lite','models/gemini-2.5-flash','models/gemini-2.0-flash'];
+  const models=[...priority.filter(n=>names.includes(n)),...names.filter(n=>!priority.includes(n))].slice(0,4);
+  if(!models.length)return res.status(502).json({error:'Google lists no compatible text models for this API key.'});
+  const failures=[];
   for(const model of models){
    const response=await fetch('https://generativelanguage.googleapis.com/v1beta/'+model+':generateContent',{
     method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
-    body:JSON.stringify({systemInstruction:{parts:[{text:'You are SoulFlame AI, the DAVID DPP operator assistant. Reply in the same language as the operator. Be accurate, concise, and do not invent legal facts or claim to have called anyone.'}]},contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:512,temperature:0.3,thinkingConfig:{thinkingBudget:0}}}),
-    signal:AbortSignal.timeout(10000)
+    body:JSON.stringify({contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:320,temperature:0.3}}),
+    signal:AbortSignal.timeout(12000)
    });
    const data=await response.json().catch(()=>({}));
    if(response.ok){
     const reply=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
     if(reply)return res.status(200).json({reply});
-    return res.status(502).json({error:'Gemini returned no text.'});
+    failures.push(model+': empty response');continue;
    }
-   if(response.status===429)return res.status(429).json({error:'Gemini quota exceeded (429). Check usage in Google AI Studio.'});
-   if(response.status===404)continue;
-   if(response.status===400 && /response modalities|only AUDIO|not supported by the model/i.test(String(data.error?.message||'')))continue;
-   if(response.status===400){
-    const detail=String(data.error?.message||'').slice(0,200).replace(/[\r\n]/g,' ');
-    return res.status(502).json({error:'Gemini rejected request (400): '+detail});
-   }
-   return res.status(502).json({error:'Gemini request failed (Google HTTP '+response.status+').'});
+   if(response.status===429)return res.status(429).json({error:'Gemini quota exceeded (429). Check Google AI Studio usage.'});
+   failures.push(model+': HTTP '+response.status);
+   if(response.status!==404&&response.status!==400)break;
   }
-  return res.status(502).json({error:'None of the available Gemini models accepted generateContent.'});
+  return res.status(502).json({error:'Gemini text models failed: '+failures.join(', ').slice(0,240)});
  }catch(error){return res.status(502).json({error:error?.name==='TimeoutError'?'Gemini text generation timed out after 10 seconds. Check Google API response latency.':'Cannot reach Gemini API. Try again later.'});}
 }
