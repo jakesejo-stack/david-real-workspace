@@ -29,5 +29,7 @@ jobs:
           node --check recovery/compiled-frontend/assets/index-p3-2.js
           node --check src/admin-worker-picker.mjs
           node --check src/operator-company-workflows.mjs
+      - name: Install dependencies for API contract tests
+        run: npm install --ignore-scripts --no-audit --no-fund
       - name: Execute unit/contract tests
         run: node --test tests/*.test.mjs
