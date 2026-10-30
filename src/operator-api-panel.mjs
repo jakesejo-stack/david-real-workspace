@@ -6,7 +6,7 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   const section=node('section');section.className='card';
   section.append(node('h2','API · Моят Gemini'));
   section.append(node('p','1. Отвори Gemini, копирай личния си API ключ. 2. Върни се тук, постави го и натисни Запиши.'));
-  const link=node('a','🔑 Отвори Gemini API Key');
+  const link=node('a','🔑 Генерирай Gemini API ключ');
   link.className='btn primary';link.style.display='inline-block';link.style.textDecoration='none';link.style.marginBottom='16px';
   link.href='https://aistudio.google.com/apikey';link.target='_blank';link.rel='noopener noreferrer';
   section.append(link);
@@ -17,7 +17,9 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   const status=node('p');status.setAttribute('role','status');
   const entry=node('div');entry.style.display='flex';entry.style.gap='10px';entry.style.alignItems='center';entry.style.flexWrap='wrap';
   field.style.flex='1 1 260px';field.style.width='auto';button.style.flex='0 0 auto';
-  entry.append(field,button);section.append(label,entry,status);
+  entry.append(field,button);section.append(label,entry);
+  const syncInfo=node('p','🔗 Свързване с Google профила, с който си влязъл в DAVID. Натисни „Запиши“, за да синхронизираш ключа.');
+  syncInfo.style.fontSize='13px';section.append(syncInfo,status);
   container.replaceChildren(section);
   // No localStorage, sessionStorage, plaintext DB writes, or key logging.
   if(typeof saveKey!=='function'){button.disabled=true;status.textContent='Защитеното запазване още не е свързано.';return;}
@@ -30,7 +32,7 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
     try{
       await saveKey(key);
       field.value='';
-      status.textContent='Ключът е запазен към профила.';
+      status.textContent='Gemini API ключът е синхронизиран с текущия Google профил.';
     }catch{
       status.textContent='Запазването не успя. Опитай отново.';
     }finally{
