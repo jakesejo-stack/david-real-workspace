@@ -24,6 +24,7 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   container.replaceChildren(section);
   // No localStorage, sessionStorage, plaintext DB writes, or key logging.
   if(typeof saveKey!=='function'){button.disabled=true;status.textContent='Защитеното запазване още не е свързано.';return;}
+  const lock=()=>{field.value='';field.disabled=true;button.disabled=true;button.textContent='🔒 Свързан с профила';link.style.display='none';};
   let saving=false;
   button.addEventListener('click',async()=>{
     if(saving)return;
@@ -35,19 +36,20 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
     try{
       const result=await saveKey(key);
       if(result?.saved!==true)throw Error('Save not confirmed');
-      field.value='';
+      lock();
       showStatus('✓ Готово! Gemini API ключът е запазен успешно и е свързан с този Google профил.',true);
     }catch(error){
       const messages={401:'Google сесията не е потвърдена. Излез и влез отново през Google.',403:'Този Google профил няма одобрено членство в DAVID. Администратор трябва да го одобри.',400:'Сървърът отхвърля формата на ключа.',503:'Сървърната конфигурация за защитено записване е непълна.',500:'Supabase не успя да запише ключа. Нужна е проверка на базата данни.'};
       showStatus('✕ '+(messages[error?.status]||'Неуспешна връзка със сървъра. Опитай по-късно.'));
     }finally{
-      saving=false;button.disabled=false;
+      saving=false;if(!field.disabled)button.disabled=false;
     }
   });
   if(typeof getConnection==='function')Promise.resolve().then(()=>getConnection()).then(s=>{
     // Do not overwrite a more recent save result with stale connection status.
     if(!saving&&!field.value&&status.textContent==='') {
-      showStatus(s?.connected?'✓ Готово! Gemini е свързан с този Google профил.':'Gemini още не е свързан. Добави ключ и натисни „Запиши“.',!!s?.connected);
+      if(s?.connected)lock();
+      showStatus(s?.connected?'✓ Готово! Gemini е свързан и заключен към този Google профил. Отвори Soulflame AI от менюто.':'Gemini още не е свързан. Добави ключ и натисни „Запиши“.',!!s?.connected);
     }
   }).catch(()=>{
     if(!saving&&status.textContent==='')showStatus('Не може да се провери дали Gemini е свързан.');
