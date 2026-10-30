@@ -47,7 +47,7 @@ create table public.david_audit_events (
  actor_id uuid, action text, company_id uuid, details jsonb
 );
 create or replace function david_internal.david_is_admin()
-returns boolean language sql stable security definer set search_path='' as $
+returns boolean language sql stable security definer set search_path='' as $$
  select exists(select 1 from public.david_members m
  where m.user_id=auth.uid() and m.role='admin')
 $$;
