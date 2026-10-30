@@ -52,7 +52,7 @@ returns boolean language sql stable security definer set search_path='' as $$
  where m.user_id=auth.uid() and m.role='admin')
 $$;
 create or replace function david_internal.david_is_active_member()
-returns boolean language sql stable set search_path='' as $$
+returns boolean language sql stable security definer set search_path='' as $$
  select exists(select 1 from public.david_members m
  left join public.david_worker_identities wi on wi.user_id=m.user_id
  where m.user_id=auth.uid()
