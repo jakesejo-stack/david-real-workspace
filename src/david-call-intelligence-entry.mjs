@@ -154,6 +154,10 @@ function mountDesk(root){
  const record=node('button','btn subtle','Потвърди съгласие за аудиозапис');
  listen.type='button';record.type='button';
  const actions=node('div','david-ci-consent-actions');actions.append(language,listen,record);
+ const stopTrans=node('button','btn red','Спри транскрипцията');
+ const stopRecording=node('button','btn red','Спри аудиозаписа');
+ stopTrans.type='button';stopRecording.type='button';stopTrans.hidden=true;stopRecording.hidden=true;
+ actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
  permissions.append(notice,actions,result);
  panel.append(meta,customer,answer,permissions);
@@ -175,6 +179,21 @@ function mountDesk(root){
  };
  listen.addEventListener('click',()=>consent('transcription'));
  record.addEventListener('click',()=>consent('recording'));
+ const stop=async scope=>{
+  if(!callSid||!window.confirm('Спиране на '+(scope==='recording'?'аудиозаписа':'транскрипцията')+' за този разговор?'))return;
+  const button=scope==='recording'?stopRecording:stopTrans;
+  button.disabled=true;result.textContent='Спиране на обработката...';
+  try{
+   const out=await callApi('live-stop',{},{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({call_sid:callSid,scope})
+   });
+   result.textContent=out.stopped?'✓ Обработката е спряна.':'Няма потвърждение за спиране.';
+  }catch(error){result.textContent='Неуспешно спиране: '+error.message}
+  finally{button.disabled=false;update()}
+ };
+ stopTrans.addEventListener('click',()=>stop('transcription'));
+ stopRecording.addEventListener('click',()=>stop('recording'));
  const update=async()=>{
   if(busy||!panel.isConnected)return;busy=true;
   try{
@@ -182,6 +201,7 @@ function mountDesk(root){
    if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';answer.textContent='DAVID: Очаквам разговор.';return;}
    callSid=data.call_sid;permissions.hidden=false;
    listen.disabled=!!data.transcription_authorized;record.disabled=!!data.recording_authorized;
+   stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
    customer.textContent='Клиент: '+(data.latest_customer_line||'Очаквам клиентска реплика');
    answer.textContent='DAVID: '+(data.suggestion||'Очаквам клиентската реплика, след която ще предложа точен отговор за оператора.');
