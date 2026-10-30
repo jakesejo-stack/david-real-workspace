@@ -144,22 +144,52 @@ function mountDesk(root){
  const meta=node('p','muted','Проверка на активния разговор...');
  const customer=node('div','david-ci-utterance','Клиент: —');
  const answer=node('div','david-ci-answer','DAVID: Очаквам потвърден разговор и първа реплика от клиента.');
- panel.append(meta,customer,answer);
+ const permissions=node('div','david-ci-permissions');permissions.hidden=true;
+ const notice=node('p','muted','Преди активиране уведомете клиента, че речта се изпраща за разпознаване и AI анализ, и потвърдете разрешението му. Аудиозаписът се разрешава отделно.');
+ const language=node('select','field');language.setAttribute('aria-label','Език на клиента');
+ for(const [code,label] of [['bg-BG','Български'],['en-US','English'],['es-ES','Español'],['de-DE','Deutsch'],['fr-FR','Français']]){
+  const opt=node('option','',label);opt.value=code;language.append(opt);
+ }
+ const listen=node('button','btn primary','Потвърди съгласие за транскрипция');
+ const record=node('button','btn subtle','Потвърди съгласие за аудиозапис');
+ listen.type='button';record.type='button';
+ const actions=node('div','david-ci-consent-actions');actions.append(language,listen,record);
+ const result=node('p','muted','');
+ permissions.append(notice,actions,result);
+ panel.append(meta,customer,answer,permissions);
  heading.insertAdjacentElement('afterend',panel);
- let busy=false, timer=null;
+ let busy=false, timer=null,callSid=null;
+ const consent=async scope=>{
+  if(!callSid)return;
+  if(!window.confirm(scope==='recording'?'Клиентът изрично разреши ли аудиозаписването?':'Клиентът изрично разреши ли речта да се транскрибира и анализира от AI?'))return;
+  const button=scope==='recording'?record:listen;
+  button.disabled=true;result.textContent='Проверявам Twilio и правното потвърждение...';
+  try{
+   const out=await callApi('live-consent',{},{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({call_sid:callSid,scope,clientConfirmed:true,noticeVersion:'david-v1',method:'verbal',language_code:language.value})
+   });
+   result.textContent=out.started?'✓ Twilio '+(scope==='recording'?'аудиозапис':'транскрипция')+' е стартиран.':'Съгласието е отчетено, но обработката още не е стартирана.';
+  }catch(error){result.textContent='Не е активирано: '+error.message;}
+  finally{button.disabled=false;update();}
+ };
+ listen.addEventListener('click',()=>consent('transcription'));
+ record.addEventListener('click',()=>consent('recording'));
  const update=async()=>{
   if(busy||!panel.isConnected)return;busy=true;
   try{
    const data=await callApi('live-status');
-   if(!data.active){meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';answer.textContent='DAVID: Очаквам разговор.';return;}
+   if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';answer.textContent='DAVID: Очаквам разговор.';return;}
+   callSid=data.call_sid;permissions.hidden=false;
+   listen.disabled=!!data.transcription_authorized;record.disabled=!!data.recording_authorized;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
    customer.textContent='Клиент: '+(data.latest_customer_line||'Очаквам клиентска реплика');
-   answer.textContent='DAVID: '+(data.suggestion||'Очаквам контекст за следващата реплика');
+   answer.textContent='DAVID: '+(data.suggestion||'Очаквам клиентската реплика, след която ще предложа точен отговор за оператора.');
   }catch(error){meta.textContent='Live Coach: '+error.message}
   finally{busy=false;}
  };
  update();
- timer=setInterval(()=>{if(document.visibilityState==='visible'&&panel.isConnected&&panel.offsetParent!==null)update();if(!panel.isConnected)clearInterval(timer);},2000);
+ timer=setInterval(()=>{if(document.visibilityState==='visible'&&panel.isConnected&&panel.offsetParent!==null)update();if(!panel.isConnected)clearInterval(timer);},1500);
 }
 let scheduled=false;
 const observer=new MutationObserver(()=>{
@@ -172,6 +202,9 @@ css.textContent=`
 .david-ci-list-header,.david-ci-record{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .david-ci-items{display:grid;gap:10px;margin-top:14px}.david-ci-record{border:1px solid #dbe7f5;border-radius:12px;padding:14px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
+.david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.david-ci-consent-actions select{width:auto;flex:0 1 180px}
+.david-ci-permissions[hidden]{display:none!important}
 .david-ci-utterance{padding:14px;border-radius:12px;background:#eaf3ff;margin:12px 0}
 .david-ci-answer{padding:14px;border-radius:12px;background:#dff8ed;color:#0a533b;line-height:1.6;font-size:15px;margin:10px 0}
 .david-ci-modal{position:fixed;inset:0;background:#0b1d37a8;z-index:1100;display:flex;align-items:center;justify-content:center;padding:18px}
