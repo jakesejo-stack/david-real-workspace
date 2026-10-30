@@ -86,13 +86,28 @@ async function refresh(){
  if(requestError){inbox.append(el('p','Грешка при заявките: '+requestError.message));}
  else{
   const rows=Array.isArray(requests?.requests)?requests.requests:[];
+  const ids=rows.map(x=>x.user_id).filter(Boolean);
+  let profiles=new Map(),profileError=null;
+  if(ids.length){
+   const q=await db.from('david_operator_profiles')
+     .select('user_id,full_name,country,languages,phone').in('user_id',ids);
+   profileError=q.error;
+   profiles=new Map((q.data||[]).map(p=>[p.user_id,p]));
+  }
+  if(profileError)inbox.append(el('p','Профилите още не са достъпни: '+profileError.message));
   if(!rows.length)inbox.append(el('p','Няма заявки за регистрация.'));
   for(const row of rows){
    const item=el('article',null,'item');
    item.append(el('strong',row.name||row.email),el('p',row.email+' · '+row.status,'meta'));
+   const profile=profiles.get(row.user_id);
+   if(profile){
+    item.append(el('p','Държава: '+profile.country+' · Езици: '+profile.languages.join(', '),'meta'));
+    item.append(el('p','Служебен контакт: '+profile.phone,'meta'));
+   }else item.append(el('p','Регистрационният профил не е попълнен. Одобрението е блокирано.','meta'));
    if(row.status==='pending'){
     for(const [approve,label] of [[true,'Одобри като оператор'],[false,'Откажи']]){
      const btn=el('button',label,approve?'':'secondary');btn.type='button';
+     if(approve&&!profile)btn.disabled=true;
      btn.addEventListener('click',async()=>{
       if(!window.confirm(label+' '+row.email+'?'))return;
       btn.disabled=true;
