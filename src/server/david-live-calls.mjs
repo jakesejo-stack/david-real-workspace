@@ -359,14 +359,28 @@ export async function handleCallIntelligence(req,res,action){
    return response(res,200,{role:a.role,calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,has_recording_permission:!!s.recording_consent_at&&a.role==='admin',transcription_authorized:!!s.transcription_consent_at,outcome:outcomeMap.get(s.call_sid)||null}))});
   }
   if(action==='live-status'){
-   let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
+   let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
    if(a.role!=='admin')q=q.eq('worker_user_id',a.user.id);
    const {data,error}=await q.maybeSingle();
    if(error)return response(res,503,{error:'live_status_unavailable'});
    if(!data)return response(res,200,{active:false});
-   const {data:latest}=await a.db.from('david_live_coach_suggestions').select('suggestion,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
-   const {data:line}=await a.db.from('david_live_transcript_segments').select('speaker,content,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
-   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,recording_active:!!data.recording_sid&&!data.recording_stopped_at,latest_customer_line:line?.speaker==='client'?line.content:null,suggestion:latest?.suggestion||null,suggestion_at:latest?.created_at});
+   const recentNotesQuery=data.company_id?a.db.from('david_live_call_outcomes').select('disposition,notes,updated_at').eq('company_id',data.company_id).order('updated_at',{ascending:false}).limit(4):Promise.resolve({data:[],error:null});
+   const [suggest,lines,notes]=await Promise.all([
+     a.db.from('david_live_coach_suggestions').select('transcript_segment_id,suggestion,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(8),
+     a.db.from('david_live_transcript_segments').select('id,speaker,content,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(24),
+     recentNotesQuery
+   ]);
+   const transcripts=(lines.data||[]).reverse();
+   const hints=new Map((suggest.data||[]).map(x=>[x.transcript_segment_id,x.suggestion]));
+   const customer=transcripts.filter(x=>x.speaker==='client').at(-1);
+   const operator=transcripts.filter(x=>x.speaker==='operator').at(-1);
+   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,
+     transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
+     transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,recording_active:!!data.recording_sid&&!data.recording_stopped_at,
+     latest_customer_line:customer?.content||null,latest_operator_line:operator?.content||null,
+     suggestion:suggest.data?.[0]?.suggestion||null,suggestion_at:suggest.data?.[0]?.created_at||null,
+     transcript:transcripts.map(x=>({...x,david_hint:hints.get(x.id)||null})),
+     recent_notes:notes.data||[]});
   }
   const s=await ownedSession(a,req.query?.sid);
   if(!s)return response(res,404,{error:'call_not_found'});
