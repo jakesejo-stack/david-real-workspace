@@ -1,7 +1,10 @@
 // DAVID unified post-call workflow. Existing navigation and Twilio dial buttons remain authoritative.
 // Every list is filled only from authenticated, real server records. No fake call or audio content.
 import {createClient} from '@supabase/supabase-js';
+import {Device} from '@twilio/voice-sdk';
 let client,config;
+let callingDevice=null,callingCall=null,connecting=false;
+let activeCallStatus='';
 async function jwt(){
  if(!config){const r=await fetch('/api/config',{cache:'no-store'});config=await r.json();}
  if(!client)client=createClient(config.supabaseUrl,config.supabaseAnonKey);
@@ -17,6 +20,44 @@ async function api(path,method='GET',payload){
  return out;
 }
 const endp=action=>'/api/integrations/david/'+action;
+async function startApprovedCall(status){
+ if(connecting||callingCall)throw Error('Вече има активен или започващ разговор');
+ connecting=true;activeCallStatus='Проверявам одобрената задача и номер...';status(activeCallStatus);
+ try{
+  // Token comes from the same protected daily-task endpoint used by the real DAVID backend.
+  // Never use caller-provided phone numbers to bypass the admin-approved dialing list.
+  const task=await api(endp('task-token'),'POST');
+  if(!task?.token||!/^\+?[1-9]\d{6,14}$/.test(String(task.dialTo||'')))throw Error('Няма потвърден номер за набиране.');
+  if(!window.confirm('Да започнем реално обаждане до '+task.dialTo+'? Twilio начислява такси.')){activeCallStatus='Отказано от оператора';status(activeCallStatus);return;}
+  activeCallStatus='Свързвам микрофона към Twilio...';status(activeCallStatus);
+  const dev=new Device(task.token,{logLevel:'warn',closeProtection:true});
+  callingDevice=dev;
+  dev.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);});
+  const call=await dev.connect({params:{taskId:task.taskId}});
+  callingCall=call;
+  const finish=()=>{
+   if(callingCall===call)callingCall=null;
+   if(callingDevice===dev){try{dev.destroy()}catch{}callingDevice=null;}
+   activeCallStatus='Разговорът приключи. Попълни резултата и бележката.';status(activeCallStatus);
+  };
+  call.on('ringing',()=>{activeCallStatus='☎ Звъни...';status(activeCallStatus)});
+  call.on('accept',()=>{activeCallStatus='● Реален разговор през Twilio';status(activeCallStatus)});
+  call.on('disconnect',finish);call.on('cancel',finish);call.on('reject',finish);
+  call.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);finish()});
+  activeCallStatus='☎ Набиране на '+task.dialTo;status(activeCallStatus);
+ }catch(error){
+  activeCallStatus='Неуспешно обаждане: '+String(error?.message||error);
+  status(activeCallStatus);
+  if(callingDevice&&!callingCall){try{callingDevice.destroy()}catch{}callingDevice=null;}
+  throw error;
+ }finally{connecting=false;}
+}
+function endApprovedCall(){
+ if(!callingCall)return false;
+ callingCall.disconnect();
+ return true;
+}
+
 function el(tag,className,text){
  const n=document.createElement(tag);
  if(className)n.className=className;
@@ -52,11 +93,17 @@ function mountLive(root){
  const timeline=el('div','sf-sales-timeline');timeline.setAttribute('aria-live','polite');
  const phoneActions=el('div','sf-sales-phone-actions');
  const dial=el('button','btn green','☎ Набери'),hangup=el('button','btn red','■ Затвори');
- dial.type=hangup.type='button';dial.disabled=true;hangup.disabled=true;
- dial.addEventListener('click',()=>{const original=document.getElementById('startDial');if(original&&!original.disabled)original.click();});
- hangup.addEventListener('click',()=>{const original=document.getElementById('endDial');if(original&&!original.disabled)original.click();});
+ dial.type=hangup.type='button';dial.disabled=false;hangup.disabled=true;
+ const telephoneStatus=el('p','sf-sales-call-status','Само разрешени задачи и номера от DAVID. Нужни са Twilio credentials и разрешен микрофон.');
+ const setCallStatus=msg=>{telephoneStatus.textContent=msg;};
+ dial.addEventListener('click',async()=>{
+  dial.disabled=true;
+  try{await startApprovedCall(setCallStatus);}catch(error){setCallStatus(String(error?.message||error));}
+  finally{dial.disabled=connecting||!!callingCall;hangup.disabled=!callingCall;}
+ });
+ hangup.addEventListener('click',()=>{if(endApprovedCall())setCallStatus('Прекратяване на обаждането...')});
  phoneActions.append(dial,hangup);
- call.append(companyName,client,operator,david,timeline,phoneActions);
+ call.append(companyName,client,operator,david,timeline,phoneActions,telephoneStatus);
  const right=el('aside','sf-sales-right');
  right.append(el('h3','','Последни бележки за бизнеса'));
  const companyNote=el('div','sf-sales-notes');companyNote.append(el('p','muted','Бележките се появяват само за назначената фирма.'));
@@ -113,9 +160,9 @@ function mountLive(root){
   if(!shell.isConnected||busy)return;busy=true;
   try{
    const x=await api(endp('live-status'));
-   const old=document.getElementById('startDial'),stop=document.getElementById('endDial');
-   dial.disabled=!old||old.disabled;
-   hangup.disabled=!stop||stop.disabled;
+   dial.disabled=connecting||!!callingCall;
+   hangup.disabled=!callingCall;
+   if(activeCallStatus)telephoneStatus.textContent=activeCallStatus;
    badge.textContent=x.active?(x.state==='in-progress'?'● В разговор':'◉ Набиране'):'Няма активен разговор';
    badge.className='tag '+(x.active?'green':'gray');
    if(x.active){
@@ -264,6 +311,8 @@ css.textContent=`
 .sf-sales-line.client{background:#fff5e6}
 .sf-sales-phone-actions{display:flex;justify-content:center;gap:12px;margin:16px auto}
 .sf-sales-phone-actions button{flex:1 1 0;max-width:210px;min-height:48px;font-size:16px}
+.sf-sales-call-status{font-size:13px;color:#476383;margin:6px 0 0;overflow-wrap:anywhere}
+.main:has(#sf-sales-meeting)>.dock{display:none!important}
 .sf-sales-right{background:white;border:1px solid #dbe7f5;padding:14px;border-radius:14px;overflow:auto;max-height:560px}
 .sf-sales-right h3{margin:0 0 12px}
 .sf-sale-note{border:1px solid #e1e9f5;border-radius:12px;padding:12px;margin:8px 0;background:#fbfdff}
