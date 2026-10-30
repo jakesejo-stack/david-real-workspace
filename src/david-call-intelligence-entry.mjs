@@ -47,6 +47,7 @@ function hideModal(){
  if(closeCallback){closeCallback.focus();closeCallback=null;}
 }
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&modal?.style.display==='flex')hideModal();});
+document.addEventListener('david:open-call',event=>{const sid=event.detail?.sid;if(typeof sid==='string'&&/^CA[0-9a-f]{32}$/i.test(sid))openCall(sid,event.detail?.trigger||null);});
 function sectionTitle(text){return node('h3','david-ci-section-heading',text);}
 async function openCall(sid,trigger){
  const shell=modalShell();closeCallback=trigger;
@@ -83,12 +84,13 @@ async function openCall(sid,trigger){
      const resp=await fetch('/api/integrations/david/live-audio?'+new URLSearchParams({sid,recording_sid:records[0].recording_sid}),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
      if(!resp.ok){const err=await resp.json().catch(()=>({}));throw Error(err.error||'Аудиото не е достъпно');}
      const blob=await resp.blob();if(playerBlob)URL.revokeObjectURL(playerBlob);
+     await callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_sid:sid,kind:'audio'})});
      playerBlob=URL.createObjectURL(blob);const audio=node('audio','');audio.controls=true;audio.preload='none';audio.src=playerBlob;audio.style.width='100%';holder.replaceChildren(audio);
     }catch(error){holder.textContent=error.message}finally{playButton.disabled=false}
    });
    sound.append(playButton,holder);
   }
-  body.append(sound);
+  if(data.audio_access===true)body.append(sound);
   const transcript=node('section','david-ci-section');transcript.append(sectionTitle('Пълен разговор и DAVID подсказки'));
   const suggestions=new Map((data.suggestions||[]).map(x=>[x.transcript_segment_id,x]));
   const segments=data.transcript||[];
@@ -103,6 +105,8 @@ async function openCall(sid,trigger){
    if(ai){const card=node('article','david-ci-answer');card.append(node('strong','','DAVID: '),document.createTextNode(ai.suggestion));transcript.append(card);}
   }
   body.append(transcript);
+  if(data.outcome){const outcome=node('section','david-ci-section');outcome.append(sectionTitle('Резултат и бележка'));outcome.append(node('p','',({no_answer:'Не вдигнаха',neutral:'Неутрално',early_access:'Ранно записване'})[data.outcome.disposition]||data.outcome.disposition));outcome.append(node('p','david-ci-pre',data.outcome.notes||'Няма бележка.'));body.append(outcome);}
+  if(data.audio_access===true)callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_sid:sid,kind:'chat'})}).catch(()=>{});
  }catch(error){setMessage(body,'Неуспешно зареждане: '+error.message)}
 }
 function mountCallRecords(root){
