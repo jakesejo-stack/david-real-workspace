@@ -17,18 +17,29 @@ async function request(method,key){
  if(!response.ok)throw Error('Gemini key request failed');
  return response.json();
 }
-let attached=false;
+// Keep the original DAVID profile layout, but replace its blue Tasks CTA
+// with the Gemini setup workflow. No browser storage is used for API keys.
 function attach(){
  const root=document.getElementById('root');if(!root)return;
  const heading=[...root.querySelectorAll('h1,h2')].find(x=>x.textContent?.trim()==='Google профил');
- if(!heading){attached=false;return;}
+ if(!heading)return;
  if(root.querySelector('#david-gemini-profile'))return;
- const panel=document.createElement('div');panel.id='david-gemini-profile';
  const host=heading.closest('.main')||heading.parentElement;
- host.append(panel);
- mountOperatorApiPanel(panel,{getConnection:()=>request('GET'),saveKey:key=>request('POST',key)});
- attached=true;
+ const taskButton=[...host.querySelectorAll('button,a')].find(el=>/Отвори\s*ЗАДАЧИ/i.test(el.textContent||''));
+ if(!taskButton)return;
+ const panel=document.createElement('div');
+ panel.id='david-gemini-profile';
+ taskButton.replaceWith(panel);
+ mountOperatorApiPanel(panel,{
+  getConnection:()=>request('GET'),
+  saveKey:key=>request('POST',key)
+ });
 }
-const observer=new MutationObserver(()=>{if(!attached||!document.getElementById('david-gemini-profile'))attach()});
+let pending=false;
+const observer=new MutationObserver(()=>{
+ if(pending)return;
+ pending=true;
+ queueMicrotask(()=>{pending=false;attach()});
+});
 observer.observe(document.getElementById('root')||document.body,{childList:true,subtree:true});
 attach();
