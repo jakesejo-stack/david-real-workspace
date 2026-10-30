@@ -25,6 +25,18 @@ section{border:1px solid #4b3926;background:#1b1b1b;border-radius:17px;padding:2
 </form>
 <p class="meta">Google входът сам по себе си не одобрява оператора. Одобрение и блокиране стават с администраторско действие.</p>
 </section>
+<section><h2>Заявки за регистрация с Google</h2><p class="meta">Само ти и Митко можете да приемате или отказвате оператори.</p><div id="google-requests" class="panel-list"></div></section>
+<section>
+<h2>Създай задача за оператор</h2>
+<form id="taskform" class="form">
+<div><label>Одобрен оператор<select name="worker" required><option value="">Избери оператор</option></select></label></div>
+<div><label>Фирма (по избор)<select name="company"><option value="">Без конкретна фирма</option></select></label></div>
+<div><label>Заглавие<input name="title" required minlength="4" maxlength="180" placeholder="Свържи се с производителя"></label></div>
+<div><label>Инструкции<textarea name="description" maxlength="6000" placeholder="Цел, контекст и следващи действия"></textarea></label></div>
+<div><label>Приоритет<select name="priority"><option>P2</option><option>P1</option><option>P0</option><option>P3</option></select></label></div>
+<button type="submit">Възложи задача</button>
+</form>
+<p class="meta">При посочена фирма тя се назначава на оператора. Задачата се вижда в неговия раздел „Задачи“.</p></section>
 <div class="split">
 <section><h2>Работници и покани</h2><div id="workers" class="panel-list"></div></section>
 <section><h2>Фирми и назначения</h2><div id="companies" class="panel-list"></div></section>
@@ -36,6 +48,7 @@ section{border:1px solid #4b3926;background:#1b1b1b;border-radius:17px;padding:2
 import {createClient} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/+esm';
 const db=createClient('https://lyyqfpbrgjsxdqukwurl.supabase.co',"sb_publishable_vmL558NJwhKaYbnDzvQ0rA_EXl_c9K_",{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id);
+const ADMIN_EMAILS=new Set(['borquitokonsejo@gmail.com','soulflame.mitko@gmail.com']);
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e};
 let me=null;
 const setStatus=(s)=>{$('status').textContent=s};
@@ -48,7 +61,7 @@ async function load(){
  db.from('david_members').select('role').eq('user_id',user.id).maybeSingle(),
  db.from('david_worker_identities').select('active').eq('user_id',user.id).maybeSingle()
  ]);
- if(member.error||identity.error||member.data?.role!=='admin'||identity.data?.active!==true){
+ if(!ADMIN_EMAILS.has(String(user.email||'').trim().toLowerCase())||member.error||identity.error||member.data?.role!=='admin'||identity.data?.active!==true){
    setStatus('Нямаш активни администраторски права за този акаунт.');return
  }
  $('content').hidden=false;setStatus('Администраторските права са потвърдени.');
@@ -65,9 +78,51 @@ async function refresh(){
  const errors=[inv,mem,ids,companies,results].filter(x=>x.error).map(x=>x.error.message);
  if(errors.length){setStatus('Четене: '+errors.join(' | '));return}
  const membership=new Map((mem.data||[]).map(m=>[m.user_id,m]));
+ // Existing SECURITY DEFINER RPC rejects workers even if they bypass this UI.
+ const {data:requests,error:requestError}=await db.rpc('david_admin_google_access_requests');
+ const inbox=$('google-requests');inbox.replaceChildren();
+ if(requestError){inbox.append(el('p','Грешка при заявките: '+requestError.message));}
+ else{
+  const rows=Array.isArray(requests?.requests)?requests.requests:[];
+  if(!rows.length)inbox.append(el('p','Няма заявки за регистрация.'));
+  for(const row of rows){
+   const item=el('article',null,'item');
+   item.append(el('strong',row.name||row.email),el('p',row.email+' · '+row.status,'meta'));
+   if(row.status==='pending'){
+    for(const [approve,label] of [[true,'Одобри като оператор'],[false,'Откажи']]){
+     const btn=el('button',label,approve?'':'secondary');btn.type='button';
+     btn.addEventListener('click',async()=>{
+      if(!window.confirm(label+' '+row.email+'?'))return;
+      btn.disabled=true;
+      const {data:result,error:err}=await db.rpc('david_admin_review_google_access',{
+        p_user_id:row.user_id,p_approve:approve,p_operator_kind:'operator'});
+      btn.disabled=false;
+      setStatus(err?'Грешка при одобрението: '+err.message:result?.ok?'Заявката е обработена.':'Непотвърдена операция.');
+      if(!err&&result?.ok)await refresh();
+     });item.append(btn);
+    }
+   }
+   inbox.append(item);
+  }
+ }
+ 
  const active=new Map((ids.data||[]).map(i=>[i.user_id,i.active]));
  const approvedWorkers=(mem.data||[]).filter(m=>m.role==='worker'&&active.get(m.user_id));
  const workerNames=new Map((inv.data||[]).filter(i=>i.linked_user_id).map(i=>[i.linked_user_id,i.email]));
+ const form=$('taskform');
+ const operatorSelect=form.elements.namedItem('worker'),companySelect=form.elements.namedItem('company');
+ const previouslySelected=operatorSelect.value,previousCompany=companySelect.value;
+ operatorSelect.replaceChildren(new Option('Избери оператор',''));
+ for(const w of approvedWorkers){
+   const email=workerNames.get(w.user_id);
+   // The RPC verifies the worker email again against auth.users and verified Google identity.
+   if(email)operatorSelect.append(new Option(email,w.user_id));
+ }
+ if([...operatorSelect.options].some(x=>x.value===previouslySelected))operatorSelect.value=previouslySelected;
+ companySelect.replaceChildren(new Option('Без конкретна фирма',''));
+ for(const c of companies.data||[])companySelect.append(new Option(c.company_name+' · '+(c.country||''),c.id));
+ if([...companySelect.options].some(x=>x.value===previousCompany))companySelect.value=previousCompany;
+ 
  const wbox=$('workers');wbox.replaceChildren();
  if(!(inv.data||[]).length)wbox.append(el('p','Няма покани.'));
  for(const i of (inv.data||[])){
@@ -148,6 +203,37 @@ async function refresh(){
   rbox.append(node);
  }
 }
+$('taskform').addEventListener('submit',async e=>{
+ e.preventDefault();const form=e.currentTarget,submit=form.querySelector('button[type="submit"]');
+ const id=form.elements.namedItem('worker').value;
+ const company=form.elements.namedItem('company').value;
+ const name=form.elements.namedItem('worker').selectedOptions[0]?.textContent?.trim()||'';
+ const title=form.elements.namedItem('title').value.trim();
+ const description=form.elements.namedItem('description').value.trim();
+ const priority=form.elements.namedItem('priority').value;
+ if(!id||!name.includes('@')||title.length<4){setStatus('Избери одобрен оператор и въведи заглавие.');return}
+ submit.disabled=true;
+ try{
+  if(company){
+   const assigned=await db.rpc('david_admin_assign_company',{p_company_id:company,p_worker_user_id:id});
+   if(assigned.error||assigned.data?.ok!==true)throw Error('Назначението на фирмата не успя: '+(assigned.error?.message||'отказ'));
+  }
+  const result=await db.rpc('david_admin_create_assignment',{
+   p_worker_email:name,p_title:title,p_description:description,
+   p_priority:priority,p_source:'human'
+  });
+  if(result.error||result.data?.ok!==true)throw Error('Създаването на задача не успя'+(company?', но фирмата вече е назначена':'')+': '+(result.error?.message||'отказ'));
+  if(company){
+   // A descriptive pointer on the already assigned company; the task's record remains authoritative.
+   const updated=await db.from('david_companies').update({task:title+' · '+description.slice(0,500)}).eq('id',company).eq('assigned_to',id);
+   if(updated.error)setStatus('Задачата е възложена, но фирменият текст не е синхронизиран: '+updated.error.message);
+   else setStatus('Задачата и фирмата са назначени успешно.');
+  }else setStatus('Задачата е създадена успешно.');
+  form.elements.namedItem('title').value='';form.elements.namedItem('description').value='';
+  await refresh();
+ }catch(err){setStatus('Грешка: '+err.message)}
+ finally{submit.disabled=false}
+});
 $('inviteform').addEventListener('submit',async e=>{
  e.preventDefault();const f=e.currentTarget;
  const email=f.elements.namedItem('email').value.trim().toLowerCase();
