@@ -2,6 +2,7 @@
 import {authorizedBridge,serviceClient,jsonBody,validCode,validExternalId,codeDigest,response} from '../../_david_link_shared.js';
 
 import twilio from 'twilio';
+import {handleCallIntelligence} from '../../../src/server/david-live-calls.mjs';
 import {approvedGoogleUser} from '../../_david_link_shared.js';
 
 const taskConfigKeys=['SUPABASE_SERVICE_ROLE_KEY','TWILIO_ACCOUNT_SID','TWILIO_API_KEY_SID','TWILIO_API_KEY_SECRET','TWILIO_AUTH_TOKEN','TWILIO_TASK_TWIML_APP_SID','TWILIO_FROM_NUMBER','PUBLIC_ORIGIN','DPP_TASK_ALLOWED_NUMBERS'];
@@ -76,13 +77,49 @@ async function handleTaskVoice(req,res){
    worker_user_id:id,task_id:task.id,task_date:dialDay(),target_phone:phone,parent_call_sid:sid,status:'initiated'
   });
   if(error)return dialReject(res,'Daily calling limit or verification failed.');
+  // A REAL Twilio parent CallSid creates one durable session. Do not create sample calls.
+  const {data:matches,error:companyError}=await db.from('david_companies')
+   .select('id,company_name,country,sector,contact_name,contact_email,contact_phone,research_notes,task')
+   .eq('assigned_to',id).eq('contact_phone',phone).eq('calling_approved',true).eq('do_not_call',false).limit(2);
+  if(companyError)return dialReject(res,'Company verification unavailable.');
+  const company=matches?.length===1?matches[0]:null;
+  const snapshot=company?{company_name:company.company_name,country:company.country,sector:company.sector,
+    contact_name:company.contact_name,contact_email:company.contact_email,
+    contact_phone:company.contact_phone,research_notes:company.research_notes,task:company.task}:{};
+  const {error:sessionError}=await db.from('david_live_call_sessions').upsert({
+    call_sid:sid,worker_user_id:id,company_id:company?.id||null,company_snapshot:snapshot,
+    state:'initiated',language_code:'bg-BG'
+  },{onConflict:'call_sid',ignoreDuplicates:true});
+  if(sessionError)return dialReject(res,'Call timeline storage unavailable.');
   const twiml=new twilio.twiml.VoiceResponse();
-  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record'});
+  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record',action:callbackUrl('task-dial-finished'),method:'POST'});
   dial.number(phone);
   res.setHeader('Content-Type','text/xml; charset=utf-8');
   res.setHeader('Cache-Control','no-store');
   return res.status(200).send(twiml.toString());
  }catch{return dialReject(res,'Calling is not currently available.')}
+}
+async function handleTaskDialFinished(req,res){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ if(!signedTwilio(req,'task-dial-finished'))return response(res,403,{error:'twilio_signature_invalid'});
+ const sid=String(req.body?.CallSid||'');
+ if(!callSidPattern.test(sid))return response(res,400,{error:'bad_call_sid'});
+ const raw=String(req.body?.DialCallStatus||'failed');
+ const state=raw==='completed'?'completed':raw==='canceled'?'canceled':'failed';
+ const duration=Number(req.body?.DialCallDuration);
+ const db=serviceClient();
+ const patch={state,ended_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+ const attemptPatch={status:raw,updated_at:new Date().toISOString()};
+ if(Number.isInteger(duration)&&duration>=0&&duration<=7200)attemptPatch.duration_seconds=duration;
+ const [s,a]=await Promise.all([
+  db.from('david_live_call_sessions').update(patch).eq('call_sid',sid),
+  db.from('david_task_call_attempts').update(attemptPatch).eq('parent_call_sid',sid)
+ ]);
+ if(s.error||a.error)return response(res,503,{error:'call_completion_unavailable'});
+ const xml=new twilio.twiml.VoiceResponse();xml.hangup();
+ res.setHeader('Content-Type','text/xml; charset=utf-8');
+ res.setHeader('Cache-Control','no-store');
+ return res.status(200).send(xml.toString());
 }
 async function handleTaskStatus(req,res){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
@@ -187,6 +224,8 @@ async function handleDppTasks(req,res,action){
 
 export default async function handler(req,res){
  const action=req.query?.action;
+ if(action==='task-dial-finished')return handleTaskDialFinished(req,res);
+ if(['call-records','call-detail','live-status','live-consent','live-audio','live-transcript','live-recording-status'].includes(action))return handleCallIntelligence(req,res,action);
  if(typeof action==='string'&&action.startsWith('tasks-'))return handleDppTasks(req,res,action.slice(6));
  if(action==='tryout-voice'){
   if(!['GET','POST'].includes(req.method))return response(res,405,{error:'method_not_allowed'});
