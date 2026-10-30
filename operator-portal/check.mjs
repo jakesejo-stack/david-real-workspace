@@ -22,6 +22,7 @@ assert(p.includes('david_operator_portal_snapshot'));
 assert(p.includes('id="application-form"'),'Registration form required');
 assert(p.includes('david_operator_submit_profile'),'Profile RPC required');
 assert(p.includes('david_my_task_board'),'Assigned tasks RPC required');
+assert(p.includes('david_operator_private_company_history'),'Private redacted history required');
 assert(p.includes('david_update_assignment_status'),'Worker task updates required');
 assert(p.includes("eq('worker_user_id',currentUser.id)"));
 assert(!p.includes('>Company Info<'),'No separate Company Info menu');
