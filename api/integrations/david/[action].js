@@ -40,6 +40,78 @@ async function taskWorker(db,userId){
  if(identity.data?.active!==true||!['worker','admin'].includes(member.data?.role)||!task.data||task.data.target_calls<1)return null;
  return task.data;
 }
+
+async function handleTaskPreflight(req,res){
+ if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
+ const ctx=await approvedGoogleUser(req);
+ if(!ctx)return response(res,401,{error:'google_login_required'});
+ const db=serviceClient();
+ let task;
+ try{task=await taskWorker(db,ctx.user.id)}
+ catch{return response(res,503,{error:'task_lookup_unavailable'})}
+ const phone=getTaskNumber(task);
+ const approved=!!task&&!!phone&&permittedNumber(phone);
+ const {data:attempts,error:ae}=await db.from('david_task_call_attempts')
+  .select('id').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(1);
+ if(ae)return response(res,503,{error:'attempt_check_unavailable'});
+ const configurationPresent=taskConfigKeys.every(k=>!!process.env[k]);
+ const enabled=process.env.LIVE_CALLS_ENABLED==='true';
+ const state={configurationPresent,enabled,taskApproved:approved,attemptsRemaining:!(attempts||[]).length?1:0,
+  targetMasked:phone?phone.slice(0,4)+'••••'+phone.slice(-4):null,
+  accountValid:false,apiKeyValid:false,twimlUrlCorrect:false,callerIdVerified:false,
+  trialRecipientVerified:null,accountType:null,errors:[]};
+ if(!configurationPresent){
+  state.errors.push('missing_server_config');
+  return response(res,200,{ready:false,...state});
+ }
+ const account=process.env.TWILIO_ACCOUNT_SID,authToken=process.env.TWILIO_AUTH_TOKEN;
+ const appSid=process.env.TWILIO_TASK_TWIML_APP_SID;
+ const from=String(process.env.TWILIO_FROM_NUMBER||'');
+ if(!/^AC[0-9a-f]{32}$/i.test(account)||!/^SK[0-9a-f]{32}$/i.test(process.env.TWILIO_API_KEY_SID)||
+    !/^AP[0-9a-f]{32}$/i.test(appSid)||!/^\+[1-9]\d{7,14}$/.test(from)){
+   state.errors.push('invalid_sid_or_caller_id_format');
+   return response(res,200,{ready:false,...state});
+ }
+ const root='https://api.twilio.com/2010-04-01/Accounts/'+account;
+ const authHeader=(user,secret)=>({Authorization:'Basic '+Buffer.from(user+':'+secret).toString('base64')});
+ async function check(url,headers){
+  try{
+   const r=await fetch(url,{headers,signal:AbortSignal.timeout(6500)});
+   if(!r.ok)return {ok:false,status:r.status};
+   return {ok:true,data:await r.json()};
+  }catch{return {ok:false,status:0}}
+ }
+ const accountAuth=authHeader(account,authToken);
+ const apiAuth=authHeader(process.env.TWILIO_API_KEY_SID,process.env.TWILIO_API_KEY_SECRET);
+ const [acc,app,verified,owned,destination]=await Promise.all([
+  check(root+'.json',accountAuth),
+  check(root+'/Applications/'+appSid+'.json',apiAuth),
+  check(root+'/OutgoingCallerIds.json?PhoneNumber='+encodeURIComponent(from),accountAuth),
+  check(root+'/IncomingPhoneNumbers.json?PhoneNumber='+encodeURIComponent(from),accountAuth),
+  approved?check(root+'/OutgoingCallerIds.json?PhoneNumber='+encodeURIComponent(phone),accountAuth):Promise.resolve({ok:false})
+ ]);
+ state.accountValid=acc.ok&&acc.data?.status==='active';
+ state.accountType=acc.ok?String(acc.data?.type||'unknown').slice(0,30):null;
+ state.apiKeyValid=app.ok;
+ state.twimlUrlCorrect=app.ok&&String(app.data?.voice_url||'').replace(/\/$/,'')===callbackUrl('task-voice')&&
+  String(app.data?.voice_method||'POST').toUpperCase()==='POST';
+ state.callerIdVerified=(verified.ok&&verified.data?.outgoing_caller_ids?.some(x=>x.phone_number===from))||
+  (owned.ok&&owned.data?.incoming_phone_numbers?.some(x=>x.phone_number===from))||false;
+ state.trialRecipientVerified=String(state.accountType||'').toLowerCase()==='trial'?
+  (destination.ok&&destination.data?.outgoing_caller_ids?.some(x=>x.phone_number===phone)) : null;
+ if(!state.accountValid)state.errors.push('twilio_account_auth_invalid');
+ if(!state.apiKeyValid)state.errors.push('twilio_api_key_invalid');
+ if(!state.twimlUrlCorrect)state.errors.push('twiml_voice_url_wrong');
+ if(!state.callerIdVerified)state.errors.push('caller_id_not_verified');
+ if(state.trialRecipientVerified===false)state.errors.push('trial_destination_not_verified');
+ if(!approved)state.errors.push('approved_task_missing');
+ if(!enabled)state.errors.push('live_calls_disabled');
+ if(state.attemptsRemaining===0)state.errors.push('daily_attempt_already_used');
+ const ready=state.accountValid&&state.apiKeyValid&&state.twimlUrlCorrect&&state.callerIdVerified&&
+  state.trialRecipientVerified!==false&&approved&&enabled&&state.attemptsRemaining>0;
+ return response(res,200,{ready,...state});
+}
+
 async function handleTaskToken(req,res){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
  if(!taskReady())return response(res,503,{error:'twilio_task_configuration_incomplete',message:'Twilio calling is not configured/enabled'});
@@ -245,6 +317,7 @@ export default async function handler(req,res){
   res.setHeader('X-DAVID-Voice-Sample',validAudio?'external-male-audio':'twilio-female-fallback');
   return res.status(200).send(twiml.toString());
  }
+ if(action==='task-preflight')return handleTaskPreflight(req,res);
  if(action==='task-token')return handleTaskToken(req,res);
  if(action==='task-voice')return handleTaskVoice(req,res);
  if(action==='task-status')return handleTaskStatus(req,res);
