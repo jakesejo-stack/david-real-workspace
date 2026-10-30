@@ -42,6 +42,17 @@ a{color:#e7b96b}.footer{margin-top:32px;color:#8e8782;font-size:12px}
 <div id="signedin" hidden>
 <div class="info"><span class="user" id="username"></span><button type="button" id="signout" class="subtle">Изход от Google</button></div>
 <a id="adminlink" href="/admin-dashboard.html" hidden class="num">⚙ Admin Command Center · Статистики и управление</a>
+<div id="application" hidden>
+<h2>Регистрация на оператор</h2>
+<p class="note">Попълни данните си. Само администратор може да одобри Google профила и да възложи задачи.</p>
+<form id="application-form">
+<label>Име и фамилия<input name="fullName" minlength="2" maxlength="120" required autocomplete="name"></label>
+<label>Държава<input name="country" minlength="2" maxlength="80" required autocomplete="country-name"></label>
+<label>Говорими езици, разделени със запетая<input name="languages" required placeholder="Bulgarian, English"></label>
+<label>Телефон с международен код<input name="phone" type="tel" pattern="\+[1-9][0-9]{5,14}" required placeholder="+359888123456"></label>
+<button type="submit">Изпрати регистрацията за одобрение</button>
+<p id="application-status" class="note" role="status" aria-live="polite"></p>
+</form></div>
 <div id="activation">
 <form id="codeform">
 <label for="code">Персонален служебен код</label>
@@ -82,14 +93,14 @@ async function displayState(){
   const {data:{user},error}=await db.auth.getUser();
   currentUser=error?null:user;
   show('signedin',!!currentUser);show('signedout',!currentUser);
-  if(!currentUser){show('activation',false);show('desk',false);show('adminlink',false);return}
+  if(!currentUser){show('activation',false);show('application',false);show('desk',false);show('adminlink',false);return}
   el('username').textContent=currentUser.email || 'Google акаунт';
   const {data:membership}=await db.from('david_members').select('role').eq('user_id',currentUser.id).maybeSingle();
   show('adminlink',membership?.role==='admin'&&['borquitokonsejo@gmail.com','soulflame.mitko@gmail.com'].includes(String(currentUser.email||'').toLowerCase()));
   const {data:snapshot,error:snapError}=await db.rpc('david_operator_portal_snapshot');
-  if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);return}
+  if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);show('application',false);return}
   if(snapshot?.active){
-    show('activation',false);show('desk',true);
+    show('application',false);show('activation',false);show('desk',true);
     el('role').textContent=snapshot.role==='admin'?'ADMIN':'ОПЕРАТОР';
     el('expires').textContent='До '+new Date(snapshot.expires_at).toLocaleString('bg-BG');
     const container=el('companies');container.replaceChildren();
@@ -185,20 +196,31 @@ async function displayState(){
     msg('Служебната сесия е активна. Задачите и фирмите са ограничени до твоя профил.');
   }else{
     const approved=snapshot?.reason==='code_required';
-    show('activation',approved);show('desk',false);
-    if(snapshot?.reason==='not_approved'){
-      // Verified Google owner/admin controls approval. A request never grants worker access.
-      const {data:request,error:requestError}=await db.rpc('david_google_enter_workspace');
-      if(requestError)msg('Заявката за регистрация е неуспешна: '+requestError.message,true);
-      else if(request?.status==='pending')msg('Google заявката за '+(currentUser.email||'този акаунт')+' е изпратена. Изчакай одобрение от администратор.');
-      else if(request?.status==='rejected')msg('Заявката е отказана. Свържи се с администратор.',true);
-      else if(request?.status==='blocked')msg('Този акаунт е блокиран.',true);
-      else msg('Акаунтът очаква администраторско одобрение.');
-    }
+    show('activation',approved);show('desk',false);show('application',snapshot?.reason==='not_approved');
+    if(snapshot?.reason==='not_approved')
+      msg('Регистрирай профила си с име, държава, езици и телефон. Администраторът ще прегледа заявката.');
     else if(approved)msg('Акаунтът е одобрен. Генерирай НОВ код от Call Desk със същия Google профил и го въведи тук.');
     else msg('Достъпът още не е разрешен. Свържи се с администратора.',true);
   }
 }
+el('application-form').addEventListener('submit',async event=>{
+ event.preventDefault();
+ if(!currentUser)return msg('Първо влез с Google.',true);
+ const form=event.currentTarget,button=form.querySelector('button[type="submit"]');
+ const languages=form.elements.namedItem('languages').value.split(',').map(s=>s.trim()).filter(Boolean);
+ button.disabled=true;
+ const {data,error}=await db.rpc('david_operator_submit_profile',{
+   p_full_name:form.elements.namedItem('fullName').value.trim(),
+   p_country:form.elements.namedItem('country').value.trim(),
+   p_languages:languages,
+   p_phone:form.elements.namedItem('phone').value.trim()
+ });
+ button.disabled=false;
+ const status=el('application-status');
+ status.textContent=error?'Регистрацията не е приета: '+error.message
+  :data?.ok?'Заявката е изпратена. Изчакай одобрение от администратор.':'Регистрацията не е потвърдена.';
+ if(data?.ok)msg('Заявката е записана. Нямаш достъп до фирми преди одобрение.');
+});
 el('google').addEventListener('click',async ()=>{
   buttonBusy(el('google'),true);
   const {error}=await db.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/',queryParams:{prompt:'select_account'}}});
