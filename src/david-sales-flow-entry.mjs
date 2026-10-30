@@ -20,12 +20,31 @@ async function api(path,method='GET',payload){
  return out;
 }
 const endp=action=>'/api/integrations/david/'+action;
+const preflightDescriptions={
+ missing_server_config:'Липсва Twilio настройка във Vercel',
+ invalid_sid_or_caller_id_format:'Невалиден Caller ID или Twilio идентификатор',
+ twilio_account_auth_invalid:'Twilio Account SID / Auth Token не се приемат',
+ twilio_api_key_invalid:'Twilio API Key SID / Secret не се приемат',
+ twiml_voice_url_wrong:'Twilio TwiML App Voice URL не съвпада с DAVID',
+ caller_id_not_verified:'Изходящият номер не е потвърден в Twilio',
+ trial_destination_not_verified:'Twilio Trial изисква потвърден номер на Митко',
+ approved_task_missing:'Няма одобрена задача или разрешен номер за днес',
+ live_calls_disabled:'Реалните разговори са изключени в DAVID',
+ daily_attempt_already_used:'Тестовото обаждане за днес вече е използвано'
+};
+const preflightMessage=s=>{
+ if(s.ready)return '✓ Twilio потвърди акаунта, приложението, Caller ID и днешната задача. Готово за тест.';
+ const errors=(s.errors||[]).map(k=>preflightDescriptions[k]||k);
+ return 'Twilio проверка: '+(errors.length?errors.join(' · '):'Невъзможно потвърждение');
+};
 async function startApprovedCall(status){
  if(connecting||callingCall)throw Error('Вече има активен или започващ разговор');
  connecting=true;activeCallStatus='Проверявам одобрената задача и номер...';status(activeCallStatus);
  try{
   // Token comes from the same protected daily-task endpoint used by the real DAVID backend.
   // Never use caller-provided phone numbers to bypass the admin-approved dialing list.
+  const preflight=await api(endp('task-preflight'));
+  if(!preflight.ready)throw Error(preflightMessage(preflight));
   const task=await api(endp('task-token'),'POST');
   if(!task?.token||!/^\+?[1-9]\d{6,14}$/.test(String(task.dialTo||'')))throw Error('Няма потвърден номер за набиране.');
   if(!window.confirm('Да започнем реално обаждане до '+task.dialTo+'? Twilio начислява такси.')){activeCallStatus='Отказано от оператора';status(activeCallStatus);return;}
@@ -101,6 +120,17 @@ function mountLive(root){
  const dial=el('button','btn green','☎ Набери'),hangup=el('button','btn red','■ Затвори');
  dial.type=hangup.type='button';dial.disabled=false;hangup.disabled=true;
  const telephoneStatus=el('p','sf-sales-call-status','Само разрешени задачи и номера от DAVID. Нужни са Twilio credentials и разрешен микрофон.');
+ const preflightButton=el('button','btn subtle','Провери Twilio');
+ preflightButton.type='button';
+ preflightButton.addEventListener('click',async()=>{
+  preflightButton.disabled=true;
+  telephoneStatus.textContent='Свързване с Twilio за проверка, без обаждане...';
+  try{
+   const result=await api(endp('task-preflight'));
+   telephoneStatus.textContent=preflightMessage(result);
+  }catch(error){telephoneStatus.textContent='Проверка неуспешна: '+error.message}
+  finally{preflightButton.disabled=false}
+ });
  const setCallStatus=msg=>{telephoneStatus.textContent=msg;};
  dial.addEventListener('click',async()=>{
   dial.disabled=true;
@@ -109,7 +139,7 @@ function mountLive(root){
  });
  hangup.addEventListener('click',()=>{if(endApprovedCall())setCallStatus('Прекратяване на обаждането...')});
  phoneActions.append(dial,hangup);
- call.append(companyName,client,operator,david,timeline,phoneActions,telephoneStatus);
+ call.append(companyName,client,operator,david,timeline,phoneActions,preflightButton,telephoneStatus);
  const right=el('aside','sf-sales-right');
  right.append(el('h3','','Последни бележки за бизнеса'));
  const companyNote=el('div','sf-sales-notes');companyNote.append(el('p','muted','Бележките се появяват само за назначената фирма.'));
