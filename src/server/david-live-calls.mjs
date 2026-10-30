@@ -352,7 +352,11 @@ export async function handleCallIntelligence(req,res,action){
    if(a.role!=='admin')q=q.eq('worker_user_id',a.user.id);
    const {data,error}=await q;
    if(error)return response(res,503,{error:'records_unavailable'});
-   return response(res,200,{calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,recording_authorized:!!s.recording_consent_at,transcription_authorized:!!s.transcription_consent_at}))});
+   const ids=(data||[]).map(x=>x.call_sid);
+   const {data:outcomes,error:oe}=ids.length?await a.db.from('david_live_call_outcomes').select('call_sid,disposition,notes,updated_at').in('call_sid',ids):{data:[],error:null};
+   if(oe)return response(res,503,{error:'records_outcomes_unavailable'});
+   const outcomeMap=new Map((outcomes||[]).map(x=>[x.call_sid,x]));
+   return response(res,200,{role:a.role,calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,has_recording_permission:!!s.recording_consent_at&&a.role==='admin',transcription_authorized:!!s.transcription_consent_at,outcome:outcomeMap.get(s.call_sid)||null}))});
   }
   if(action==='live-status'){
    let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
