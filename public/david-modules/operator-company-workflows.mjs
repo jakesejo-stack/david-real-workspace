@@ -29,7 +29,7 @@ export function validateApplication(input) {
 
 export async function submitApplication(db,input) {
  const p=validateApplication(input);
- const result=await rpc(db,'david_operator_submit_application',{
+ const result=await rpc(db,'david_operator_submit_profile',{
  p_full_name:p.name,p_country:p.country,p_languages:p.languages,p_phone:p.phone
  });
  if (result?.ok!==true) throw new Error('Кандидатурата не е записана.');
@@ -41,18 +41,20 @@ export async function adminApplications(db) {
  return result.requests;
 }
 export async function adminCreateCompanyTask(db,params) {
- const result=await rpc(db,'david_admin_create_company_task',{
- p_worker_user_id:params.workerId,p_company_id:params.companyId,
- p_title:params.title,p_description:params.description||'',
- p_priority:params.priority||'P2',p_due_at:params.dueAt||null
+ const {getApprovedWorkers,assignCompany,createWorkerTask}=await import('./admin-worker-picker.mjs');
+ const workers=await getApprovedWorkers(db);
+ if(!workers.some(w=>w.id===params.workerId))throw new Error('Неактивен оператор');
+ await assignCompany(db,workers,params.companyId,params.workerId);
+ const result=await createWorkerTask(db,workers,params.workerId,{
+   title:params.title,description:params.description||'',priority:params.priority||'P2',
+   dueAt:params.dueAt||null
  });
- if (result?.ok!==true) throw new Error('Задачата не е записана.');
  return result;
 }
 export async function myTasks(db) {
- const result=await rpc(db,'david_worker_my_tasks');
- if (!Array.isArray(result)) throw new Error('Невалиден списък със задачи');
- return result;
+ const result=await rpc(db,'david_my_task_board');
+ if (result?.ok!==true||!Array.isArray(result.tasks)) throw new Error('Невалиден списък със задачи');
+ return result.tasks;
 }
 export async function saveTaskContact(db,params) {
  if (!Object.hasOwn(OUTCOMES,params.outcome)) throw new Error('Невалиден резултат');
@@ -65,14 +67,30 @@ export async function saveTaskContact(db,params) {
  return result;
 }
 export async function myCompanies(db,search='') {
- const result=await rpc(db,'david_worker_my_companies',{p_query:String(search).slice(0,120)});
+ const result=await rpc(db,'david_operator_private_company_history',{p_query:String(search).slice(0,120)});
  if (!Array.isArray(result)) throw new Error('Невалиден списък с фирми');
- return result;
+ return result.map(c=>({
+  ...c,company_name:c.name,my_contact_count:c.my_contact_count||0,
+  last_outcome:c.my_history?.[0]?.outcome||null
+ }));
 }
 export async function companyDetail(db,companyId) {
- const result=await rpc(db,'david_worker_company_detail',{p_company_id:companyId});
- if(result?.ok!==true) throw new Error('Нямаш достъп до тази фирма');
- return result;
+ const companies=await myCompanies(db);
+ const company=companies.find(c=>c.company_id===companyId);
+ if(!company)throw new Error('Нямаш достъп до тази фирма');
+ // Expose currently assigned company contact ONLY through RLS; never for former assignments.
+ let current=null;
+ if(company.currently_assigned){
+  const {data,error}=await db.from('david_companies')
+   .select('city,research_notes,contact_name,contact_email,contact_phone')
+   .eq('id',companyId).eq('assigned_to',(await db.auth.getUser()).data.user?.id).maybeSingle();
+  if(!error)current=data;
+ }
+ return {
+  ok:true,
+  company:{...company,...(current||{})},tasks:[],
+  my_history:company.my_history||[]
+ };
 }
 
 function el(doc,tag,text='',attrs={}) {
@@ -241,7 +259,7 @@ export async function mountMyCompanies(container,db) {
   try{
    const result=await companyDetail(db,companyId);
    const info=result.company;
-   detail.replaceChildren(el(d,'h3',info.name));
+   detail.replaceChildren(el(d,'h3',info.company_name||info.name));
    for(const [label,value] of [
     ['Държава',info.country],['Град',info.city],['Сектор',info.sector],
     ['Информация',info.research_notes],['Контакт',info.contact_name],
