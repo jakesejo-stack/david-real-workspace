@@ -8,7 +8,6 @@ async function authToken(){
  return session.access_token;
 }
 let visible=false;
-let panelReady=false;
 function install(){
  const root=document.getElementById('root');
  if(!root)return;
@@ -18,6 +17,8 @@ function install(){
  if(parent.querySelector('#soulflame-ai-nav'))return;
  const btn=document.createElement('button');btn.id='soulflame-ai-nav';btn.textContent='✦ Soulflame AI';btn.type='button';
  nav.after(btn);
+ const existing=document.getElementById('soulflame-ai-view');
+ if(existing){btn.addEventListener('click',()=>{visible=true;existing.style.display='block';document.body.classList.add('sf-ai-open');parent.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');});return;}
  const panel=document.createElement('section');panel.id='soulflame-ai-view';panel.className='hidden';
  panel.innerHTML='<div class="card"><div class="row"><div><h1>✦ Soulflame AI</h1><p class="muted">DAVID AI асистент, свързан с Gemini ключа от твоя Google профил.</p></div><span id="sf-ai-state" class="tag gray">Проверка...</span></div><div id="sf-ai-messages" class="stack" style="min-height:180px;max-height:55vh;overflow:auto;padding:14px;background:#f6f9fe;border-radius:12px;margin:14px 0" aria-live="polite"></div><form id="sf-ai-form" class="stack"><label for="sf-ai-prompt">Напиши въпрос към DAVID</label><textarea id="sf-ai-prompt" class="field" rows="3" maxlength="4000" placeholder="Попитай за DPP, клиенти, скрипт за обаждане..."></textarea><button class="btn primary" type="submit">Изпрати към Soulflame AI</button></form><p class="tiny">Съобщенията се изпращат до Google Gemini чрез личния ти API ключ. Не въвеждай поверителни данни за клиенти без разрешение.</p></div>';
  document.body.append(panel);
@@ -43,4 +44,5 @@ function install(){
  form.addEventListener('submit',async e=>{e.preventDefault();const message=prompt.value.trim();if(!message)return;const send=form.querySelector('button');send.disabled=true;add('Ти',message);prompt.value='';try{const token=await authToken();const r=await fetch('/api/soulflame-ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw Error(data.error||'AI error');add('DAVID',data.reply);}catch(error){add('Система',error.message);}finally{send.disabled=false;}});
 }
 const css=document.createElement('style');css.textContent='body.sf-ai-open .main{visibility:hidden!important}@media(max-width:880px){#soulflame-ai-view{left:0!important;top:90px!important;bottom:70px!important;padding:14px!important}}';document.head.append(css);
+document.addEventListener('click',event=>{const clicked=event.target.closest?.('.nav button');if(!clicked||clicked.id==='soulflame-ai-nav'||!visible)return;visible=false;document.body.classList.remove('sf-ai-open');const panel=document.getElementById('soulflame-ai-view');if(panel)panel.style.display='none';},true);
 const observer=new MutationObserver(()=>install());observer.observe(document.getElementById('root')||document.body,{childList:true,subtree:true});install();
