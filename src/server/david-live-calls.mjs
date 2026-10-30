@@ -48,12 +48,12 @@ async function details(a,s){
  const [{data:utterances,error:ue},{data:suggestions,error:se},{data:recordings,error:re}]=await Promise.all([
   a.db.from('david_live_transcript_segments').select('id,speaker,content,language_code,source_at,created_at').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(300),
   a.db.from('david_live_coach_suggestions').select('id,transcript_segment_id,suggestion,created_at,latency_ms').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(150),
-  a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10)
+  a.role==='admin'?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null})
  ]);
  if(ue||se||re)throw Error('call_detail_unavailable');
  return {session:{call_sid:s.call_sid,state:s.state,started_at:s.started_at,ended_at:s.ended_at,company:safeCompany(s.company_snapshot),language_code:s.language_code,transcription_enabled:!!s.transcription_consent_at,recording_authorized:!!s.recording_consent_at},
   transcript:(utterances||[]).reverse(),suggestions:(suggestions||[]).reverse(),
-  recordings:s.recording_consent_at?(recordings||[]):[]};
+  recordings:a.role==='admin'&&s.recording_consent_at?(recordings||[]):[],audio_access:a.role==='admin'};
 }
 function decryptKey(payload,secret){
  const normalized=String(secret||'').trim();
@@ -234,6 +234,7 @@ async function audio(req,res,a){
  if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
  const sid=String(req.query?.sid||''),rsid=String(req.query?.recording_sid||'');
  if(!sidOK(sid)||!recOK(rsid))return response(res,400,{error:'invalid_id'});
+ if(a.role!=='admin')return response(res,403,{error:'admin_audio_only'});
  const s=await ownedSession(a,sid);
  if(!s||!s.recording_consent_at)return response(res,404,{error:'recording_not_available'});
  const {data:r}=await a.db.from('david_recordings').select('recording_sid,status').eq('recording_sid',rsid).eq('call_sid',sid).maybeSingle();
@@ -250,10 +251,90 @@ async function audio(req,res,a){
  noStore(res);res.setHeader('Content-Type','audio/mpeg');res.setHeader('Content-Disposition','inline; filename="david-call.mp3"');
  return res.status(200).send(bytes);
 }
+
+const outcomeKinds=new Set(['no_answer','neutral','early_access']);
+async function saveOutcome(req,res,a){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ const b=bodyOf(req),sid=String(b.call_sid||''),kind=String(b.disposition||'');
+ if(!sidOK(sid)||!outcomeKinds.has(kind))return response(res,400,{error:'invalid_call_or_disposition'});
+ if(typeof b.notes!=='string'||b.notes.length>3000)return response(res,400,{error:'invalid_notes'});
+ const session=await ownedSession(a,sid);
+ if(!session||session.worker_user_id!==a.user.id)return response(res,403,{error:'operator_may_save_only_own_call'});
+ if(!session.company_id)return response(res,409,{error:'company_not_linked_to_call'});
+ if(!['completed','failed','canceled'].includes(session.state))return response(res,409,{error:'finish_call_before_saving'});
+ const {data:company,error:ce}=await a.db.from('david_companies').select('id,assigned_to').eq('id',session.company_id).maybeSingle();
+ if(ce||!company||company.assigned_to!==a.user.id)return response(res,403,{error:'company_not_assigned'});
+ const clean=b.notes.trim();
+ const {error}=await a.db.from('david_live_call_outcomes').upsert({
+  call_sid:sid,company_id:session.company_id,worker_user_id:a.user.id,
+  disposition:kind,notes:clean,updated_at:new Date().toISOString()
+ },{onConflict:'call_sid'});
+ return response(res,error?503:200,error?{error:'outcome_save_failed'}:{saved:true,company_id:session.company_id,call_sid:sid});
+}
+async function companyHistory(req,res,a){
+ if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
+ const companyId=String(req.query?.company_id||'');
+ if(companyId&&!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(companyId))return response(res,400,{error:'invalid_company_id'});
+ let assigned=a.db.from('david_companies').select('id,company_name,country,sector,assigned_to').order('company_name').limit(100);
+ if(a.role!=='admin')assigned=assigned.eq('assigned_to',a.user.id);
+ if(companyId)assigned=assigned.eq('id',companyId);
+ const {data:companies,error:ce}=await assigned;
+ if(ce)return response(res,503,{error:'company_lookup_failed'});
+ const ids=(companies||[]).map(x=>x.id);
+ if(!ids.length)return response(res,200,{companies:[],history:[]});
+ let q=a.db.from('david_live_call_outcomes')
+  .select('call_sid,company_id,worker_user_id,disposition,notes,saved_at,updated_at')
+  .in('company_id',ids).order('updated_at',{ascending:false}).limit(200);
+ if(a.role!=='admin')q=q.eq('worker_user_id',a.user.id);
+ const {data:outcomes,error:oe}=await q;
+ if(oe)return response(res,503,{error:'history_lookup_failed'});
+ return response(res,200,{companies,history:outcomes||[]});
+}
+async function adminInbox(req,res,a){
+ if(a.role!=='admin')return response(res,403,{error:'admin_required'});
+ if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
+ const {data:calls,error:ce}=await a.db.from('david_live_call_sessions')
+  .select('call_sid,worker_user_id,company_snapshot,started_at,ended_at,state')
+  .order('started_at',{ascending:false}).limit(100);
+ if(ce)return response(res,503,{error:'inbox_unavailable'});
+ const ids=(calls||[]).map(x=>x.call_sid);
+ if(!ids.length)return response(res,200,{calls:[],unread_audio:0,unread_chat:0});
+ const [{data:records,error:re},{data:segments,error:se},{data:reads,error:ae},{data:members,error:me}]=await Promise.all([
+  a.db.from('david_recordings').select('call_sid,recording_sid,status').in('call_sid',ids).eq('status','completed'),
+  a.db.from('david_live_transcript_segments').select('call_sid,id').in('call_sid',ids).order('id',{ascending:false}).limit(600),
+  a.db.from('david_admin_call_inbox_reads').select('call_sid,chat_seen_at,audio_seen_at').eq('admin_user_id',a.user.id).in('call_sid',ids),
+  a.db.from('david_members').select('user_id,display_name').in('user_id',[...new Set((calls||[]).map(x=>x.worker_user_id))])
+ ]);
+ if(re||se||ae||me)return response(res,503,{error:'inbox_meta_unavailable'});
+ const hasAudio=new Set((records||[]).map(x=>x.call_sid)),hasChat=new Set((segments||[]).map(x=>x.call_sid));
+ const read=new Map((reads||[]).map(x=>[x.call_sid,x])),names=new Map((members||[]).map(x=>[x.user_id,x.display_name]));
+ const result=(calls||[]).map(x=>({
+  call_sid:x.call_sid,worker_user_id:x.worker_user_id,worker_name:names.get(x.worker_user_id)||'Оператор',
+  company:safeCompany(x.company_snapshot),started_at:x.started_at,ended_at:x.ended_at,state:x.state,
+  has_audio:hasAudio.has(x.call_sid),has_chat:hasChat.has(x.call_sid),
+  new_audio:hasAudio.has(x.call_sid)&&!read.get(x.call_sid)?.audio_seen_at,
+  new_chat:hasChat.has(x.call_sid)&&!read.get(x.call_sid)?.chat_seen_at
+ }));
+ return response(res,200,{calls:result,unread_audio:result.filter(x=>x.new_audio).length,unread_chat:result.filter(x=>x.new_chat).length});
+}
+async function adminMarkRead(req,res,a){
+ if(a.role!=='admin')return response(res,403,{error:'admin_required'});
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ const b=bodyOf(req),sid=String(b.call_sid||''),kind=String(b.kind||'');
+ if(!sidOK(sid)||!['audio','chat'].includes(kind))return response(res,400,{error:'invalid_read_marker'});
+ const session=await ownedSession(a,sid);
+ if(!session)return response(res,404,{error:'call_not_found'});
+ const col=kind==='audio'?'audio_seen_at':'chat_seen_at';
+ const {error}=await a.db.from('david_admin_call_inbox_reads').upsert({
+  admin_user_id:a.user.id,call_sid:sid,[col]:new Date().toISOString()
+ },{onConflict:'admin_user_id,call_sid'});
+ return response(res,error?503:200,error?{error:'read_marker_failed'}:{saved:true});
+}
+
 export async function handleCallIntelligence(req,res,action){
  if(action==='live-transcript')return webhookTranscript(req,res);
  if(action==='live-recording-status')return recordingWebhook(req,res);
- const supported=['call-records','call-detail','live-status','live-consent','live-stop','live-audio'];
+ const supported=['call-records','call-detail','live-status','live-consent','live-stop','live-audio','call-outcome','company-history','admin-inbox','admin-mark-read'];
  if(!supported.includes(action))return null;
  try{
   const a=await authorized(req);
@@ -261,6 +342,10 @@ export async function handleCallIntelligence(req,res,action){
   if(action==='live-consent')return handleConsent(req,res,a);
   if(action==='live-stop')return handleStop(req,res,a);
   if(action==='live-audio')return audio(req,res,a);
+  if(action==='call-outcome')return saveOutcome(req,res,a);
+  if(action==='company-history')return companyHistory(req,res,a);
+  if(action==='admin-inbox')return adminInbox(req,res,a);
+  if(action==='admin-mark-read')return adminMarkRead(req,res,a);
   if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
   if(action==='call-records'){
    let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_snapshot,started_at,ended_at,state,recording_consent_at,transcription_consent_at').order('started_at',{ascending:false}).limit(60);
@@ -281,6 +366,9 @@ export async function handleCallIntelligence(req,res,action){
   }
   const s=await ownedSession(a,req.query?.sid);
   if(!s)return response(res,404,{error:'call_not_found'});
-  return response(res,200,await details(a,s));
+  const data=await details(a,s);
+  const {data:outcome}=await a.db.from('david_live_call_outcomes').select('disposition,notes,updated_at').eq('call_sid',s.call_sid).maybeSingle();
+  data.outcome=outcome||null;
+  return response(res,200,data);
  }catch(err){console.warn('DAVID call intelligence error:',err?.message||'unknown');return response(res,503,{error:'call_intelligence_unavailable'})}
 }
