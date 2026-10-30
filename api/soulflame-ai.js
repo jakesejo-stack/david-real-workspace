@@ -18,6 +18,8 @@ export default async function handler(req,res){
  const {data:record,error:dbError}=await admin.from('david_operator_gemini_keys').select('encrypted_key').eq('user_id',user.id).maybeSingle();
  if(dbError)return res.status(500).json({error:'Storage unavailable'});
  if(!record?.encrypted_key)return res.status(409).json({error:'Connect Gemini in Google profile first'});
+ const {error:saveInputError}=await admin.from('david_ai_messages').insert({user_id:user.id,role:'user',content:message.trim()});
+ if(saveInputError)return res.status(500).json({error:'Не успяхме да запазим съобщението. Опитай пак.'});
  let apiKey;
  try{
   const normalized=secret.trim(),decoded=Buffer.from(normalized,'base64');
@@ -51,6 +53,8 @@ export default async function handler(req,res){
   }
   const reply=(result.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
   if(!reply)return res.status(502).json({error:'Gemini returned no text.'});
+  const {error:saveReplyError}=await admin.from('david_ai_messages').insert({user_id:user.id,role:'assistant',content:reply});
+  if(saveReplyError)return res.status(500).json({error:'DAVID отговори, но историята не можа да се запази. Опитай отново.'});
   return res.status(200).json({reply,model});
  }catch(error){return res.status(502).json({error:error?.name==='TimeoutError'?'Gemini did not respond within 7 seconds. Google latency is currently above our fast-chat target.':'Cannot reach Gemini API. Try again later.'});}
 }
