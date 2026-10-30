@@ -28,15 +28,26 @@ export default async function handler(req,res){
   apiKey=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]).toString('utf8');
  }catch{return res.status(503).json({error:'Saved Gemini key cannot be decrypted; reconnect it in Google profile'});}
  try{
-  const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{
-   method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
-   body:JSON.stringify({systemInstruction:{parts:[{text:'You are SoulFlame AI, the DAVID DPP operator assistant. Reply in the same language as the operator. Provide concise, accurate help with Digital Product Passport and EU battery regulations. Never invent facts, companies, prices, or legal claims. Do not pretend to have made phone calls. Ask for clarification when necessary.'}]},contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:900,temperature:0.4}}),
-   signal:AbortSignal.timeout(25000)
-  });
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)return res.status(502).json({error:response.status===400||response.status===403?'Gemini rejected this API key or model access':'Gemini is temporarily unavailable'});
-  const reply=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
-  if(!reply)return res.status(502).json({error:'Gemini returned no text'});
-  return res.status(200).json({reply});
- }catch{return res.status(502).json({error:'Gemini connection failed'});}
+  const models=['gemini-2.5-flash','gemini-2.5-flash-lite'];
+  for(const model of models){
+   const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',{
+    method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
+    body:JSON.stringify({systemInstruction:{parts:[{text:'You are SoulFlame AI, the DAVID DPP operator assistant. Reply in the same language as the operator. Provide concise, accurate help with Digital Product Passport and EU battery regulations. Never invent facts, companies, prices, or legal claims. Do not pretend to have made phone calls. Ask for clarification when necessary.'}]},contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:900,temperature:0.4}}),
+    signal:AbortSignal.timeout(25000)
+   });
+   const data=await response.json().catch(()=>({}));
+   if(response.ok){
+    const reply=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+    if(reply)return res.status(200).json({reply});
+    return res.status(502).json({error:'Gemini did not return text. Try a different question.'});
+   }
+   const status=response.status;
+   const googleStatus=String(data.error?.status||'');
+   if(status===401||status===403||googleStatus==='API_KEY_INVALID')return res.status(502).json({error:'Gemini API key is invalid or does not have access. Generate a new key in Google AI Studio.'});
+   if(status===429)return res.status(429).json({error:'Gemini API quota exceeded (429). Check usage and billing in Google AI Studio.'});
+   if((status===404||status===400)&&model!==models[models.length-1])continue;
+   if(status===404||status===400)return res.status(502).json({error:'Gemini model is unavailable for this API key. Check model access in Google AI Studio.'});
+   return res.status(502).json({error:'Gemini request failed (Google HTTP '+status+'). Try again later.'});
+  }
+ }catch(error){return res.status(502).json({error:error?.name==='TimeoutError'?'Gemini request timed out. Try again.':'Cannot reach Gemini API. Try again later.'});}
 }
