@@ -36,7 +36,7 @@ export default async function handler(req,res){
    if(code===400||code===401||code===403)return res.status(502).json({error:'Google rejected the Gemini API key (HTTP '+code+'). Check key restrictions and API enablement in Google AI Studio.'});
    return res.status(502).json({error:'Could not list Gemini models (Google HTTP '+code+').'});
   }
-  const supported=(listed.models||[]).filter(m=>Array.isArray(m.supportedGenerationMethods)&&m.supportedGenerationMethods.includes('generateContent')).map(m=>m.name).filter(n=>/^models\/gemini-/.test(n));
+  const supported=(listed.models||[]).filter(m=>Array.isArray(m.supportedGenerationMethods)&&m.supportedGenerationMethods.includes('generateContent')).map(m=>m.name).filter(n=>/^models\/gemini-/.test(n) && !/(tts|audio|speech|image|video|live|embedding|robotics)/i.test(n));
   const priority=['models/gemini-2.5-flash','models/gemini-2.5-flash-lite','models/gemini-2.0-flash','models/gemini-1.5-flash'];
   const models=[...priority.filter(n=>supported.includes(n)),...supported.filter(n=>!priority.includes(n))].slice(0,6);
   if(!models.length)return res.status(502).json({error:'This Gemini key has no models with generateContent access. Check Google AI Studio API access.'});
@@ -54,6 +54,7 @@ export default async function handler(req,res){
    }
    if(response.status===429)return res.status(429).json({error:'Gemini quota exceeded (429). Check usage in Google AI Studio.'});
    if(response.status===404)continue;
+   if(response.status===400 && /response modalities|only AUDIO|not supported by the model/i.test(String(data.error?.message||'')))continue;
    if(response.status===400){
     const detail=String(data.error?.message||'').slice(0,200).replace(/[\r\n]/g,' ');
     return res.status(502).json({error:'Gemini rejected request (400): '+detail});
