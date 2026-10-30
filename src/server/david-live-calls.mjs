@@ -4,6 +4,7 @@ import {createDecipheriv,createHash} from 'node:crypto';
 import twilio from 'twilio';
 import {approvedGoogleUser,serviceClient,response} from '../../api/_david_link_shared.js';
 
+export const canAccessCallAudio=role=>role==='admin';
 const sidOK=v=>/^CA[0-9a-f]{32}$/i.test(String(v||''));
 const recOK=v=>/^RE[0-9a-f]{32}$/i.test(String(v||''));
 const transOK=v=>/^GT[0-9a-f]{32}$/i.test(String(v||''));
@@ -48,12 +49,12 @@ async function details(a,s){
  const [{data:utterances,error:ue},{data:suggestions,error:se},{data:recordings,error:re}]=await Promise.all([
   a.db.from('david_live_transcript_segments').select('id,speaker,content,language_code,source_at,created_at').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(300),
   a.db.from('david_live_coach_suggestions').select('id,transcript_segment_id,suggestion,created_at,latency_ms').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(150),
-  a.role==='admin'?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null})
+  canAccessCallAudio(a.role)?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null})
  ]);
  if(ue||se||re)throw Error('call_detail_unavailable');
  return {session:{call_sid:s.call_sid,state:s.state,started_at:s.started_at,ended_at:s.ended_at,company:safeCompany(s.company_snapshot),language_code:s.language_code,transcription_enabled:!!s.transcription_consent_at,recording_authorized:!!s.recording_consent_at},
   transcript:(utterances||[]).reverse(),suggestions:(suggestions||[]).reverse(),
-  recordings:a.role==='admin'&&s.recording_consent_at?(recordings||[]):[],audio_access:a.role==='admin'};
+  recordings:canAccessCallAudio(a.role)&&s.recording_consent_at?(recordings||[]):[],audio_access:canAccessCallAudio(a.role)};
 }
 function decryptKey(payload,secret){
  const normalized=String(secret||'').trim();
@@ -234,7 +235,7 @@ async function audio(req,res,a){
  if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
  const sid=String(req.query?.sid||''),rsid=String(req.query?.recording_sid||'');
  if(!sidOK(sid)||!recOK(rsid))return response(res,400,{error:'invalid_id'});
- if(a.role!=='admin')return response(res,403,{error:'admin_audio_only'});
+ if(!canAccessCallAudio(a.role))return response(res,403,{error:'admin_audio_only'});
  const s=await ownedSession(a,sid);
  if(!s||!s.recording_consent_at)return response(res,404,{error:'recording_not_available'});
  const {data:r}=await a.db.from('david_recordings').select('recording_sid,status').eq('recording_sid',rsid).eq('call_sid',sid).maybeSingle();
@@ -356,7 +357,7 @@ export async function handleCallIntelligence(req,res,action){
    const {data:outcomes,error:oe}=ids.length?await a.db.from('david_live_call_outcomes').select('call_sid,disposition,notes,updated_at').in('call_sid',ids):{data:[],error:null};
    if(oe)return response(res,503,{error:'records_outcomes_unavailable'});
    const outcomeMap=new Map((outcomes||[]).map(x=>[x.call_sid,x]));
-   return response(res,200,{role:a.role,calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,has_recording_permission:!!s.recording_consent_at&&a.role==='admin',transcription_authorized:!!s.transcription_consent_at,outcome:outcomeMap.get(s.call_sid)||null}))});
+   return response(res,200,{role:a.role,calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,has_recording_permission:!!s.recording_consent_at&&canAccessCallAudio(a.role),transcription_authorized:!!s.transcription_consent_at,outcome:outcomeMap.get(s.call_sid)||null}))});
   }
   if(action==='live-status'){
    let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
