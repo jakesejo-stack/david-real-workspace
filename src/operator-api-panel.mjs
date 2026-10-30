@@ -29,8 +29,8 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
     if(saving)return;
     const key=field.value.trim();
     if(!key){showStatus('✕ Полето е празно. Копирай целия ключ от Google AI Studio.');return;}
-    if(!key.startsWith('AIza')){showStatus('✕ Поставеният текст не започва с AIza. Използвай Copy API key от Google AI Studio, не името или последните символи на ключа.');return;}
-    if(!/^AIza[\w-]{20,}$/.test(key)){showStatus('✕ Ключът изглежда непълен или съдържа допълнителни символи. Копирай целия API ключ от Google AI Studio.');return;}
+    if(!key.startsWith('AIza')&&!key.startsWith('AQ.')){showStatus('✕ Постави пълния Gemini ключ от AI Studio (формат AQ. или AIza).');return;}
+    if(!/^(?:AIza[\w-]{20,}|AQ\.[A-Za-z0-9._-]{20,})$/.test(key)){showStatus('✕ Ключът изглежда непълен или съдържа допълнителни символи. Копирай целия API ключ от Google AI Studio.');return;}
     saving=true;button.disabled=true;status.style.color='#555';status.textContent='Запазване...';
     try{
       const result=await saveKey(key);
