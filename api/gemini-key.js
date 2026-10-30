@@ -20,7 +20,7 @@ export default async function handler(req,res){
   if(error)return res.status(500).json({error:'Storage unavailable'});
   return res.status(200).json({connected:!!data});
  }
- if(typeof req.body?.key!=='string'||!/^AIza[\w-]{20,}$/.test(req.body.key)||req.body.key.length>256)
+ if(typeof req.body?.key!=='string'||!/^(?:AIza[\w-]{20,}|AQ\.[A-Za-z0-9._-]{20,})$/.test(req.body.key)||req.body.key.length>256)
   return res.status(400).json({error:'Invalid Gemini API key'});
  let master;
  try{master=Buffer.from(secret,'base64');if(master.length!==32)throw Error('Invalid secret')}catch{return res.status(503).json({error:'Encryption unavailable'})}
