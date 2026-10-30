@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {handleCallIntelligence,canAccessCallAudio} from '../src/server/david-live-calls.mjs';
+import davIdHandler from '../api/integrations/david/[action].js';
 
 function mockResponse(){
  return {
@@ -52,3 +53,15 @@ for(const route of ['live-audio','call-outcome','company-history','admin-inbox',
   assert.equal(res.body.error,'approved_active_google_member_required');
  });
 }
+
+test('Twilio preflight checks Google authentication before revealing account status',async()=>{
+ const res=mockResponse();
+ await davIdHandler({method:'GET',headers:{},query:{action:'task-preflight'}},res);
+ assert.equal(res.statusCode,401);
+ assert.equal(res.body.error,'google_login_required');
+});
+test('Twilio preflight never accepts a POST',async()=>{
+ const res=mockResponse();
+ await davIdHandler({method:'POST',headers:{},query:{action:'task-preflight'}},res);
+ assert.equal(res.statusCode,405);
+});
