@@ -19,7 +19,7 @@ function install(){
  nav.after(btn);
  const existing=document.getElementById('soulflame-ai-view');
  if(existing){btn.addEventListener('click',()=>{visible=true;existing.style.display='block';document.body.classList.add('sf-ai-open');parent.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');});return;}
- const panel=document.createElement('section');panel.id='soulflame-ai-view';panel.className='hidden';
+ const panel=document.createElement('section');panel.id='soulflame-ai-view';panel.className='';
  panel.innerHTML='<div class="card"><div class="row"><div><h1>✦ Soulflame AI</h1><p class="muted">DAVID AI асистент, свързан с Gemini ключа от твоя Google профил.</p></div><span id="sf-ai-state" class="tag gray">Проверка...</span></div><div id="sf-ai-messages" class="stack" style="min-height:180px;max-height:55vh;overflow:auto;padding:14px;background:#f6f9fe;border-radius:12px;margin:14px 0" aria-live="polite"></div><form id="sf-ai-form" class="stack"><label for="sf-ai-prompt">Напиши въпрос към DAVID</label><textarea id="sf-ai-prompt" class="field" rows="3" maxlength="4000" placeholder="Попитай за DPP, клиенти, скрипт за обаждане..."></textarea><button class="btn primary" type="submit">Изпрати към Soulflame AI</button></form><p class="tiny">Съобщенията се изпращат до Google Gemini чрез личния ти API ключ. Не въвеждай поверителни данни за клиенти без разрешение.</p></div>';
  document.body.append(panel);
  panel.style.cssText='position:fixed;left:260px;right:0;top:160px;bottom:0;z-index:7;overflow:auto;background:#f3f7fd;padding:28px;display:none';
