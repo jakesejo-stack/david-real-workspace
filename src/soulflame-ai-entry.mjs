@@ -14,7 +14,7 @@ function install(){
  const nav=[...root.querySelectorAll('button')].find(b=>b.textContent?.includes('Support Tickets')&&b.closest('.nav'));
  if(!nav)return;
  const parent=nav.parentElement;
- if(parent.querySelector('#soulflame-ai-nav'))return;
+ if(parent.querySelector('#soulflame-ai-nav')){const old=parent.querySelector('#soulflame-ai-nav');old.classList.toggle('active',visible);return;}
  const btn=document.createElement('button');btn.id='soulflame-ai-nav';btn.textContent='✦ Soulflame AI';btn.type='button';
  nav.after(btn);
  const existing=document.getElementById('soulflame-ai-view');
@@ -43,6 +43,6 @@ function install(){
  parent.addEventListener('click',event=>{if(event.target===btn||btn.contains(event.target))return;if(!visible)return;visible=false;panel.style.display='none';document.body.classList.remove('sf-ai-open');btn.classList.remove('active');},true);
  form.addEventListener('submit',async e=>{e.preventDefault();const message=prompt.value.trim();if(!message)return;const send=form.querySelector('button');send.disabled=true;add('Ти',message);prompt.value='';try{const token=await authToken();const r=await fetch('/api/soulflame-ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw Error(data.error||'AI error');add('DAVID',data.reply);}catch(error){add('Система',error.message);}finally{send.disabled=false;}});
 }
-const css=document.createElement('style');css.textContent='body.sf-ai-open .main{visibility:hidden!important}@media(max-width:880px){#soulflame-ai-view{left:0!important;top:90px!important;bottom:70px!important;padding:14px!important}}';document.head.append(css);
-document.addEventListener('click',event=>{const clicked=event.target.closest?.('.nav button');if(!clicked||clicked.id==='soulflame-ai-nav'||!visible)return;visible=false;document.body.classList.remove('sf-ai-open');const panel=document.getElementById('soulflame-ai-view');if(panel)panel.style.display='none';},true);
-const observer=new MutationObserver(()=>install());observer.observe(document.getElementById('root')||document.body,{childList:true,subtree:true});install();
+const css=document.createElement('style');css.textContent='body.sf-ai-open .main{visibility:hidden!important}body.sf-ai-open .nav button.active:not(#soulflame-ai-nav){background:transparent!important;color:#f1f5ff!important}body:not(.sf-ai-open) #soulflame-ai-nav.active{background:transparent!important;color:#f1f5ff!important}@media(max-width:880px){#soulflame-ai-view{left:0!important;top:90px!important;bottom:70px!important;padding:14px!important}}';document.head.append(css);
+document.addEventListener('click',event=>{const clicked=event.target.closest?.('.nav button');if(!clicked||clicked.id==='soulflame-ai-nav'||!visible)return;visible=false;document.body.classList.remove('sf-ai-open');const panel=document.getElementById('soulflame-ai-view');if(panel)panel.style.display='none';document.querySelectorAll('#soulflame-ai-nav').forEach(b=>b.classList.remove('active'));},true);
+const observer=new MutationObserver(()=>{install();const ai=document.getElementById('soulflame-ai-nav');if(ai)ai.classList.toggle('active',visible);});observer.observe(document.getElementById('root')||document.body,{childList:true,subtree:true});install();
