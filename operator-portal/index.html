@@ -85,7 +85,7 @@ async function displayState(){
   if(!currentUser){show('activation',false);show('desk',false);show('adminlink',false);return}
   el('username').textContent=currentUser.email || 'Google акаунт';
   const {data:membership}=await db.from('david_members').select('role').eq('user_id',currentUser.id).maybeSingle();
-  show('adminlink',membership?.role==='admin');
+  show('adminlink',membership?.role==='admin'&&['borquitokonsejo@gmail.com','soulflame.mitko@gmail.com'].includes(String(currentUser.email||'').toLowerCase()));
   const {data:snapshot,error:snapError}=await db.rpc('david_operator_portal_snapshot');
   if(snapError){msg('Неуспешна проверка на правата: '+snapError.message,true);show('desk',false);show('activation',false);return}
   if(snapshot?.active){
