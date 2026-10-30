@@ -33,8 +33,8 @@ export default async function handler(req,res){
   for(const model of models){
    const response=await fetch('https://generativelanguage.googleapis.com/v1beta/'+model+':generateContent',{
     method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
-    body:JSON.stringify({systemInstruction:{parts:[{text:'You are SoulFlame AI, the DAVID DPP operator assistant. Reply in the same language as the operator. Be accurate, concise, and do not invent legal facts or claim to have called anyone.'}]},contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:900,temperature:0.4}}),
-    signal:AbortSignal.timeout(12000)
+    body:JSON.stringify({systemInstruction:{parts:[{text:'You are SoulFlame AI, the DAVID DPP operator assistant. Reply in the same language as the operator. Be accurate, concise, and do not invent legal facts or claim to have called anyone.'}]},contents:[{role:'user',parts:[{text:message.trim()}]}],generationConfig:{maxOutputTokens:512,temperature:0.3,thinkingConfig:{thinkingBudget:0}}}),
+    signal:AbortSignal.timeout(10000)
    });
    const data=await response.json().catch(()=>({}));
    if(response.ok){
@@ -52,5 +52,5 @@ export default async function handler(req,res){
    return res.status(502).json({error:'Gemini request failed (Google HTTP '+response.status+').'});
   }
   return res.status(502).json({error:'None of the available Gemini models accepted generateContent.'});
- }catch(error){return res.status(502).json({error:error?.name==='TimeoutError'?'Gemini text generation timed out after 12 seconds. Check Google API response latency.':'Cannot reach Gemini API. Try again later.'});}
+ }catch(error){return res.status(502).json({error:error?.name==='TimeoutError'?'Gemini text generation timed out after 10 seconds. Check Google API response latency.':'Cannot reach Gemini API. Try again later.'});}
 }
