@@ -29,7 +29,7 @@ function install(){
   if(historyLoaded)return;
   try{
    const token=await authToken();
-   const r=await fetch('/api/david-ai-history',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   const r=await fetch('/api/david-personal?mode=history',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
    const data=await r.json();
    if(!r.ok)throw Error(data.error||'Историята не е достъпна');
    messages.replaceChildren();
