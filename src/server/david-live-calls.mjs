@@ -220,6 +220,7 @@ async function handleConsent(req,res,a){
    recording_sid:recording.sid,call_sid:sid,status:'processing',consent_basis:'operator_attested_client_permission_v1'
   },{onConflict:'recording_sid'});
   if(writeError)console.warn('DAVID recording metadata write failed');
+  await a.db.from('david_live_call_sessions').update({recording_sid:recording.sid,updated_at:new Date().toISOString()}).eq('call_sid',sid);
   return response(res,200,{consent_logged:true,started:true,scope:type});
  }catch(err){
   // A failed provider start must not be presented as a successful recording/transcription.
