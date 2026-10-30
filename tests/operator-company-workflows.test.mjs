@@ -57,7 +57,7 @@ test('my company search and detail are scoped by dedicated SQL 018 RPCs',async()
  assert.equal(calls[1].args.p_company_id,'company-uuid');
 });
 test('server denies worker access to another company without fallback',async()=>{
- const db={rpc:async()=>({data:null,error:{message:'Company not in your own work history'}})};
+ const db={rpc:async()=>({data:null,error:new Error('Company not in your own work history')})};
  await assert.rejects(()=>companyDetail(db,'other-company'),/Company not in your own work history/);
 });
 test('invalid worker task response does not silently become empty',async()=>{
