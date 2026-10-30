@@ -1,5 +1,5 @@
 import {createClient} from '@supabase/supabase-js';
-import {createCipheriv,randomBytes} from 'node:crypto';
+import {createCipheriv,randomBytes,createHash} from 'node:crypto';
 export default async function handler(req,res){
  res.setHeader('Cache-Control','no-store');
  if(!['GET','POST'].includes(req.method))return res.status(405).json({error:'Method not allowed'});
@@ -23,7 +23,13 @@ export default async function handler(req,res){
  if(typeof req.body?.key!=='string'||!/^(?:AIza[\w-]{20,}|AQ\.[A-Za-z0-9._-]{20,})$/.test(req.body.key)||req.body.key.length>256)
   return res.status(400).json({error:'Invalid Gemini API key'});
  let master;
- try{master=Buffer.from(secret,'base64');if(master.length!==32)throw Error('Invalid secret')}catch{return res.status(503).json({error:'Encryption unavailable'})}
+ try{
+  const normalized=secret.trim();
+  const decoded=Buffer.from(normalized,'base64');
+  if(decoded.length===32 && decoded.toString('base64')===normalized) master=decoded;
+  else if(normalized.length>=32) master=createHash('sha256').update(normalized,'utf8').digest();
+  else throw Error('Encryption secret too short');
+ }catch{return res.status(503).json({error:'Encryption secret must be 32 random bytes in Base64 or at least 32 random characters'});}
  const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',master,iv);
  const encrypted=Buffer.concat([cipher.update(req.body.key,'utf8'),cipher.final()]);
  const payload=Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64');
