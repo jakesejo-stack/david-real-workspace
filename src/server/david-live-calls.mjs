@@ -274,7 +274,7 @@ export async function handleCallIntelligence(req,res,action){
    if(!data)return response(res,200,{active:false});
    const {data:latest}=await a.db.from('david_live_coach_suggestions').select('suggestion,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
    const {data:line}=await a.db.from('david_live_transcript_segments').select('speaker,content,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(1).maybeSingle();
-   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,transcription_active:!!data.transcription_consent_at&&!data.transcription_stopped_at,recording_active:!!data.recording_consent_at&&!data.recording_stopped_at,latest_customer_line:line?.speaker==='client'?line.content:null,suggestion:latest?.suggestion||null,suggestion_at:latest?.created_at});
+   return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,recording_active:!!data.recording_consent_at&&!data.recording_stopped_at,latest_customer_line:line?.speaker==='client'?line.content:null,suggestion:latest?.suggestion||null,suggestion_at:latest?.created_at});
   }
   const s=await ownedSession(a,req.query?.sid);
   if(!s)return response(res,404,{error:'call_not_found'});
