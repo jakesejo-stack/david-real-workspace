@@ -31,7 +31,7 @@ function dialReject(res,message){
  res.setHeader('Cache-Control','no-store');
  return res.status(200).send(t.toString());
 }
-const dailyCallLimit=task=>Math.max(0,Math.min(2,Number(task?.target_calls)||0));
+export const dailyCallLimit=task=>Math.max(0,Math.min(2,Number(task?.target_calls)||0));
 async function taskWorker(db,userId){
  const [identity,member,task]=await Promise.all([
   db.from('david_worker_identities').select('active').eq('user_id',userId).maybeSingle(),
