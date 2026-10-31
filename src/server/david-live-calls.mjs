@@ -429,16 +429,22 @@ export async function handleCallIntelligence(req,res,action){
    if(error)return response(res,503,{error:'live_status_unavailable'});
    if(!data)return response(res,200,{active:false});
    const recentNotesQuery=data.company_id?a.db.from('david_live_call_outcomes').select('disposition,notes,updated_at').eq('company_id',data.company_id).order('updated_at',{ascending:false}).limit(4):Promise.resolve({data:[],error:null});
-   const [suggest,lines,notes]=await Promise.all([
+   const confQuery=process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'?
+    a.db.from('david_call_conferences').select('hold,transfer_status').eq('parent_call_sid',data.call_sid).maybeSingle():
+    Promise.resolve({data:null,error:null});
+   const [suggest,lines,notes,conference]=await Promise.all([
      a.db.from('david_live_coach_suggestions').select('transcript_segment_id,suggestion,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(8),
      a.db.from('david_live_transcript_segments').select('id,speaker,content,created_at').eq('call_sid',data.call_sid).order('id',{ascending:false}).limit(24),
-     recentNotesQuery
+     recentNotesQuery,
+     confQuery
    ]);
    const transcripts=(lines.data||[]).reverse();
    const hints=new Map((suggest.data||[]).map(x=>[x.transcript_segment_id,x.suggestion]));
    const customer=transcripts.filter(x=>x.speaker==='client').at(-1);
    const operator=transcripts.filter(x=>x.speaker==='operator').at(-1);
    return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,
+     conference_controls_enabled:process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'&&!!conference.data&&!conference.error,
+     on_hold:conference.data?.hold===true,transfer_status:conference.data?.transfer_status||null,
      transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
      transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,recording_active:!!data.recording_sid&&!data.recording_stopped_at,
      latest_customer_line:customer?.content||null,latest_operator_line:operator?.content||null,
