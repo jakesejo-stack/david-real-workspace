@@ -508,80 +508,89 @@ function createAdminAudioPanel(call){
  const summary=el('summary','sf-admin-audio-toggle');
  const heading=el('div','sf-admin-audio-heading');
  heading.append(
-  el('strong','',call.has_audio?'🎧 Аудиозапис · Отвори и слушай':'🎧 Аудиозапис · Няма файл'),
-  el('small','',call.has_audio?'Натисни тук за ▶ Play / Pause и времева лента':'Аудиото се появява след успешен запис и качване')
+  el('strong','',call.has_audio?'🎧 Чуй целия съхранен аудиозапис':'🎧 Аудиозапис · Няма файл'),
+  el('small','',call.has_audio?'Отвори за Play / Pause, пълна времева линия и свободно превъртане':'Файлът се появява само след успешно завършено качване')
  );
  summary.append(heading,el('span','sf-admin-audio-chevron','⌄'));
  panel.append(summary);
  const content=el('div','sf-admin-audio-content');
  const info=el('p','sf-admin-audio-message',call.has_audio?
-  'Отвори секцията, за да заредиш записа с временен администраторски достъп.':
-  call.recording_status==='pending'?'Файлът още се обработва. Натисни „Обнови“ в Admin Panel.':
-   'Няма потвърден двустранен запис за този разговор.');
- content.append(info);
- panel.append(content);
+  'Разгъни, за да изтеглим целия файл в защитената администраторска сесия.':
+  call.recording_status==='pending'?'Аудиото се качва. Обнови след потвърждение.':
+  'Няма потвърден аудиозапис за този разговор.');
+ content.append(info);panel.append(content);
  if(!call.has_audio)return panel;
  const player=el('audio','sf-admin-private-audio');
- player.controls=true;
- player.preload='metadata';
- player.hidden=true;
- player.setAttribute('aria-label','Аудиозапис от '+(call.worker_name||'оператор')+' до '+(call.company?.company_name||'клиент'));
- // The direct object URL is not public; the short-lived signed link is issued only for admins.
- const reload=el('button','btn subtle sf-admin-audio-refresh','↻ Обнови аудиото');
+ player.controls=true;player.preload='auto';player.hidden=true;
+ player.setAttribute('aria-label','Цял съхранен аудиозапис: '+(call.worker_name||'оператор')+' към '+(call.company?.company_name||'клиент'));
+ const durationDetails=el('p','sf-admin-audio-message','');
+ const reload=el('button','btn subtle sf-admin-audio-refresh','↻ Зареди целия файл отново');
  reload.type='button';
- let loading=false,objectUrl=null;
+ let loading=false,objectUrl=null,lastMeasuredDurationMs=null;
+ const callDurationMs=Number.isFinite(call.duration_seconds)?Math.round(call.duration_seconds*1000):null;
+ function durationDescription(ms){
+  const durationMs=Number.isFinite(ms)&&ms>0?ms:Number(call.recording_duration_ms)||null;
+  const details=durationMs?'Звук във файла: '+formatAudioClock(durationMs):'Продължителността на звука не може да се измери';
+  const callInfo=callDurationMs?' · Телефонна сесия: '+formatAudioClock(callDurationMs):'';
+  const partial=call.recording_end_reason==='manual_stop'||call.recording_end_reason==='limit'||
+   (durationMs&&callDurationMs&&durationMs+8000<callDurationMs);
+  return details+callInfo+(partial?' · Частичен запис. Звук преди натискане на Запис не съществува във файла.':'');
+ }
  const dispose=()=>{
-  player.pause();
-  player.removeAttribute('src');
-  player.load();
+  player.pause();player.removeAttribute('src');player.load();
   if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
-  player.hidden=true;
+  player.hidden=true;lastMeasuredDurationMs=null;
  };
  async function load(){
   if(loading||!panel.open||!panel.isConnected)return;
   loading=true;reload.disabled=true;
-  info.textContent='🔒 Проверявам администраторския достъп и зареждам аудиото...';
+  info.textContent='🔒 Проверявам администраторския достъп и зареждам ЦЕЛИЯ аудиофайл...';
   try{
-   let source;
+   let fileBlob;
    if(call.browser_recording_id){
     const data=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(call.browser_recording_id));
-    if(!data?.url||!/^https:\/\//.test(data.url))throw Error('Липсва валиден защитен аудиолинк');
-    source=data.url;
+    if(!data?.url||!/^https:\/\//.test(data.url))throw Error('Няма валиден защитен аудиолинк');
+    // Resolve the time-limited signed URL NOW, then retain all audio bytes in a
+    // local Blob URL. A 60-second link expiry cannot truncate long playback.
+    const response=await fetch(data.url,{cache:'no-store'});
+    if(!response.ok)throw Error('Зареждане на защитения файл: '+response.status);
+    fileBlob=await response.blob();
    }else if(call.provider_recording_sid){
     const token=await jwt();
     const url=endp('live-audio')+'?sid='+encodeURIComponent(call.call_sid)+'&recording_sid='+encodeURIComponent(call.provider_recording_sid);
     const response=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-    if(!response.ok)throw Error('Няма достъп до записания разговор');
-    objectUrl=URL.createObjectURL(await response.blob());
-    source=objectUrl;
+    if(!response.ok)throw Error('Няма достъп до записа');
+    fileBlob=await response.blob();
    }else throw Error('Няма съхранен аудиофайл');
-   if(!panel.open||!panel.isConnected){
-    if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
-    return;
-   }
-   // Refresh a signed link on every opening so an expired URL cannot break playback.
-   player.pause();
-   player.src=source;
-   player.hidden=false;
-   player.load();
-   info.textContent='Натисни ▶ Play, за да чуеш разговора. Можеш да поставяш на пауза и да превърташ.';
+   const prepared=await preparePlaybackBlob(fileBlob);
+   if(!panel.open||!panel.isConnected)return;
+   dispose();
+   lastMeasuredDurationMs=prepared.durationMs||Number(call.recording_duration_ms)||null;
+   objectUrl=URL.createObjectURL(prepared.blob);
+   player.src=objectUrl;player.hidden=false;player.load();
+   durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
+   info.textContent='✓ Целият съхранен файл е зареден ('+(prepared.blob.size/1048576).toFixed(2)+' MB). Натисни ▶ Play, за да го чуеш от начало до край.';
    try{await api(endp('admin-mark-read'),'POST',{call_sid:call.call_sid,kind:'audio'})}catch{}
   }catch(error){
    dispose();
-   info.textContent='Неуспешно зареждане на аудиото: '+error.message+'. Опитай „Обнови аудиото“.';
-  }finally{
-   loading=false;reload.disabled=false;
-  }
+   info.textContent='Неуспешно зареждане: '+error.message+'. Натисни „Зареди целия файл отново“.';
+  }finally{loading=false;reload.disabled=false}
  }
  panel.addEventListener('toggle',()=>{
   if(panel.open)load();
-  else{if(!loading)dispose();info.textContent='Отвори секцията за прослушване на записа.'}
+  else{if(!loading)dispose();info.textContent='Разгъни, за да чуеш целия файл.'}
+ });
+ player.addEventListener('loadedmetadata',()=>{
+  if(Number.isFinite(player.duration)&&player.duration>0){
+   lastMeasuredDurationMs=player.duration*1000;
+   durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
+  }
  });
  player.addEventListener('error',()=>{
-  if(panel.open&&!player.hidden)info.textContent='Проблем с възпроизвеждането. Натисни „Обнови аудиото“ за нов временен линк.';
+  if(panel.open&&!player.hidden)info.textContent='Неуспешно възпроизвеждане. Избери „Зареди целия файл отново“.';
  });
  reload.addEventListener('click',load);
- content.append(player,reload);
+ content.append(player,durationDetails,reload);
  return panel;
 }
 
