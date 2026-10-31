@@ -367,7 +367,8 @@ async function adminInbox(req,res,a){
   {data:browser,error:browserError},
   {data:attempts,error:attemptError},
   {data:outcomes,error:outcomeError},
-  {data:profiles,error:profileError}
+  {data:profiles,error:profileError},
+  {data:invites,error:inviteError}
  ]=await Promise.all([
   a.db.from('david_recordings').select('call_sid,recording_sid,status,created_at').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
   a.db.from('david_live_transcript_segments').select('call_sid,id,speaker,content,created_at').in('call_sid',ids).order('id',{ascending:false}).limit(800),
@@ -376,15 +377,17 @@ async function adminInbox(req,res,a){
   a.db.from('david_browser_recordings').select('id,call_sid,status,byte_size,created_at,completed_at,consent_at').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
   a.db.from('david_task_call_attempts').select('parent_call_sid,target_phone,status,duration_seconds,created_at').in('parent_call_sid',ids),
   a.db.from('david_live_call_outcomes').select('call_sid,disposition,notes,updated_at').in('call_sid',ids),
-  a.db.from('david_ai_profiles').select('user_id,full_name,gmail').in('user_id',workerIds)
+  a.db.from('david_ai_profiles').select('user_id,full_name,gmail').in('user_id',workerIds),
+  a.db.from('david_worker_invites').select('linked_user_id,email').in('linked_user_id',workerIds)
  ]);
- if(providerError||segmentError||readError||memberError||browserError||attemptError||outcomeError||profileError)
+ if(providerError||segmentError||readError||memberError||browserError||attemptError||outcomeError||profileError||inviteError)
   return response(res,503,{error:'inbox_meta_unavailable'});
  const firstByCall=rows=>new Map((rows||[]).map(r=>[r.call_sid,r]));
  const browserMap=firstByCall(browser),providerMap=firstByCall(provider),attemptMap=firstByCall(attempts);
  const outcomeMap=firstByCall(outcomes),seenMap=firstByCall(reads);
  const membersById=new Map((members||[]).map(m=>[m.user_id,m.display_name]));
  const profilesById=new Map((profiles||[]).map(p=>[p.user_id,p]));
+ const invitedById=new Map((invites||[]).map(p=>[p.linked_user_id,p.email]));
  const transcriptByCall=new Map();
  for(const line of (segments||[])){
   const lines=transcriptByCall.get(line.call_sid)||[];
@@ -405,7 +408,7 @@ async function adminInbox(req,res,a){
   return {
    call_sid:c.call_sid,worker_user_id:c.worker_user_id,
    worker_name:String(profile.full_name||membersById.get(c.worker_user_id)||'Оператор').slice(0,150),
-   worker_email:typeof profile.gmail==='string'?profile.gmail.slice(0,200):null,
+   worker_email:String(profile.gmail||invitedById.get(c.worker_user_id)||'').slice(0,200)||null,
    company:safeCompany(c.company_snapshot),
    dialed_number:attempt?.target_phone||c.company_snapshot?.contact_phone||null,
    started_at:c.started_at,ended_at:c.ended_at,state:c.state,
