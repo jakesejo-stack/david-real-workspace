@@ -82,14 +82,20 @@ async function startApprovedCall(status){
 let browserRecording=null;
 const browserRecordingActive=()=>!!browserRecording?.recorder&&browserRecording.recorder.state!=='inactive';
 const recorderFormat=()=>['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(x=>MediaRecorder.isTypeSupported(x));
+async function currentLiveSid(){
+ const clientSid=String(callingCall?.parameters?.CallSid||'');
+ if(/^CA[0-9a-f]{32}$/i.test(clientSid))return clientSid;
+ const live=await api(endp('live-status'));
+ if(live.active&&/^CA[0-9a-f]{32}$/i.test(live.call_sid))return live.call_sid;
+ throw Error('Няма потвърден Call SID за активния разговор');
+}
 async function beginBrowserRecording(status,updateControls){
  if(browserRecordingActive()||browserRecording?.uploading)throw Error('Вече има активен запис или качване');
  if(!callingCall||callingCall.status()!=='open')throw Error('Няма свързан разговор');
  if(typeof MediaRecorder==='undefined')throw Error('Браузърът не поддържа MediaRecorder');
  const local=callingCall.getLocalStream(),remote=callingCall.getRemoteStream();
  if(!local?.getAudioTracks().length||!remote?.getAudioTracks().length)throw Error('Няма звук и от двете страни. Не започвам непълен запис.');
- const sid=String(callingCall.parameters?.CallSid||'');
- if(!/^CA[0-9a-f]{32}$/i.test(sid))throw Error('Twilio още не е върнал Call SID');
+ const sid=await currentLiveSid();
  if(!window.confirm('Кажи на клиента: „Разговорът се записва, искате ли да продължим?“\n\nКлиентът изрично ли даде съгласие да се запишат двата гласа?')){
   status('Няма съгласие. Записът не е стартиран.');return false;
  }
@@ -225,7 +231,7 @@ function mountLive(root){
  });
  hold.addEventListener('click',async()=>{
   if(!callingCall)return;hold.disabled=true;
-  try{const result=await api(endp('task-hold'),'POST',{call_sid:callingCall.parameters?.CallSid,hold:!callOnHold});
+  try{const result=await api(endp('task-hold'),'POST',{call_sid:await currentLiveSid(),hold:!callOnHold});
    callOnHold=result.hold===true;
    const rec=browserRecording?.recorder;
    if(rec?.state==='recording'&&callOnHold)rec.pause();
@@ -239,7 +245,7 @@ function mountLive(root){
   const number=window.prompt('Номер за прехвърляне, предварително разрешен от администратор (+359...)','');
   if(!number||!window.confirm('Прехвърли към '+number+'? Twilio начислява отделна такса.'))return;
   transfer.disabled=true;
-  try{const result=await api(endp('task-transfer'),'POST',{call_sid:callingCall.parameters?.CallSid,destination:number});
+  try{const result=await api(endp('task-transfer'),'POST',{call_sid:await currentLiveSid(),destination:number});
    setCallStatus(result.success?'Новият номер звъни. Прехвърляне след успешно свързване.':'Прехвърлянето не успя.')}
   catch(error){setCallStatus('Прехвърлянето не е изпълнено: '+error.message)}
   finally{syncControls()}
