@@ -396,57 +396,161 @@ function mountCompanies(root){
  }
  refresh.addEventListener('click',load);load();
 }
+const exactTime=value=>value?new Date(value).toLocaleString('bg-BG',{
+ timeZone:'Europe/Sofia',year:'numeric',month:'2-digit',day:'2-digit',
+ hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+}):'—';
+const elapsed=seconds=>{
+ if(!Number.isFinite(seconds)||seconds<0)return '—';
+ const total=Math.floor(seconds);
+ return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
+};
 function mountAdmin(root){
  const title=[...root.querySelectorAll('.main h1,.main h2')].find(h=>h.textContent?.trim()==='Admin Panel');
  if(!title)return;
  const host=title.closest('.main');if(!host||host.querySelector('#sf-admin-call-inbox'))return;
  const section=el('section','card sf-admin-call-inbox');section.id='sf-admin-call-inbox';
- const header=el('div','sf-sales-header');header.append(el('h2','','DAVID · Admin Call Inbox'));
- const counters=el('strong','','New Audio: 0 · New Chat: 0');
- const reload=el('button','btn subtle','↻ Обнови');header.append(counters,reload);section.append(header);
- const details=el('p','muted','Администраторите виждат всички реални разговори. Операторът вижда само текст и собствените бележки.');
- section.append(details);
+ const header=el('div','sf-sales-header');header.append(el('h2','','☎ DAVID · Admin Call Records'));
+ const counters=el('strong','','Общо: 0 · Аудио: 0 · Нови: 0');
+ const refresh=el('button','btn subtle','↻ Обнови');
+ header.append(counters,refresh);section.append(header);
+ section.append(el('p','muted','За администратори: оператор, клиент, точен час, продължителност, запис, транскрипция и бележки. Аудиото се съхранява в частно хранилище.'));
+ const tools=el('div','sf-admin-call-filters');
+ const search=el('input','field');search.type='search';
+ search.placeholder='Търси оператор, Gmail, телефон, фирма или бележка';
+ search.setAttribute('aria-label','Търсене в администраторските разговори');
+ const audioFilter=el('label','sf-admin-audio-filter');
+ const onlyAudio=el('input');onlyAudio.type='checkbox';
+ audioFilter.append(onlyAudio,document.createTextNode(' Само със запис'));
+ tools.append(search,audioFilter);section.append(tools);
  const list=el('div','sf-sales-items');section.append(list);
  title.insertAdjacentElement('afterend',section);
- let busy=false;
+ let loading=false,latest=[],lastFetch=0;
+ function addText(parent,tag,cls,value){parent.append(el(tag,cls,value||'—'))}
+ function render(){
+  if(!section.isConnected)return;
+  const term=search.value.trim().toLocaleLowerCase('bg-BG');
+  const filtered=latest.filter(c=>{
+   if(onlyAudio.checked&&!c.has_audio)return false;
+   const searchable=[c.worker_name,c.worker_email,c.company?.company_name,c.company?.contact_name,
+    c.dialed_number,c.outcome?.notes,c.outcome?.disposition].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
+   return !term||searchable.includes(term);
+  });
+  list.replaceChildren();
+  if(!filtered.length){
+   list.append(el('p','muted',latest.length?'Няма разговори по този филтър.':'Все още няма реални разговори.'));
+   return;
+  }
+  for(const c of filtered){
+   const card=el('article','sf-sales-item sf-admin-audit-card');
+   const top=el('div','sf-admin-audit-heading');
+   const identity=el('div','sf-admin-identity');
+   addText(identity,'strong','',c.worker_name||'Оператор');
+   addText(identity,'small','muted',c.worker_email||'Проверен профил · '+String(c.worker_user_id||'').slice(0,8));
+   top.append(identity,el('span','sf-admin-call-state',c.state||'неизвестен статус'));
+   card.append(top);
+   addText(card,'h3','sf-admin-company',c.company?.company_name||'Няма фирма');
+   const fields=el('div','sf-admin-call-facts');
+   for(const [name,value] of [
+    ['Клиент / телефон',[c.company?.contact_name,c.dialed_number].filter(Boolean).join(' · ')||'—'],
+    ['Начало',exactTime(c.started_at)],
+    ['Край',exactTime(c.ended_at)],
+    ['Продължителност',elapsed(c.duration_seconds)],
+    ['Резултат',statusLabels[c.outcome?.disposition]|| (c.outcome?'Друг':'Няма запазен резултат')]
+   ]){
+    const field=el('div','sf-admin-call-fact');
+    field.append(el('span','muted',name),el('strong','',value));fields.append(field);
+   }
+   card.append(fields);
+   if(c.outcome?.notes){
+    const notes=el('div','sf-admin-outcome-note');
+    notes.append(el('strong','','Бележка от оператора'),el('p','',c.outcome.notes));card.append(notes);
+   }else card.append(el('p','muted','Все още няма бележка към този разговор.'));
+   const recording=el('div','sf-admin-recording-status');
+   const recStatus=c.has_audio?'✓ Записът е съхранен':c.recording_status==='pending'?
+    '◉ Аудиото се качва / очаква потвърждение':c.recording_status==='failed'?
+    '⚠ Неуспешен запис':'— Няма аудиозапис';
+   recording.append(el('strong','',recStatus));
+   if(c.has_audio){
+    const mb=Number(c.recording_bytes)>0?' · '+(c.recording_bytes/1024/1024).toFixed(2)+' MB':'';
+    recording.append(el('small','muted',' · '+exactTime(c.recording_completed_at||c.recording_started_at)+mb));
+   }else if(c.recording_consent){
+    recording.append(el('small','muted',' · Има регистрирано съгласие, но няма потвърден файл.'));
+   }
+   card.append(recording);
+   if(c.transcript_preview?.length){
+    const transcript=el('div','sf-admin-transcript-preview');
+    transcript.append(el('strong','','Последни реплики (транскрипция)'));
+    for(const line of c.transcript_preview){
+     const prefix=line.speaker==='client'?'Клиент: ':'Оператор: ';
+     transcript.append(el('p','',prefix+line.content));
+    }
+    card.append(transcript);
+   }else card.append(el('p','muted','Няма налична транскрипция за този разговор.'));
+   const row=el('div','sf-sales-row sf-admin-call-buttons');
+   const audio=el('button','btn primary',c.new_audio?'● Нов аудиозапис':'🎧 Прослушай записа');
+   audio.type='button';audio.disabled=!c.has_audio;
+   if(!c.has_audio)audio.textContent=c.recording_status==='pending'?'⌛ Очаква качване':'🎧 Няма аудио';
+   const chat=el('button','btn subtle',c.new_chat?'● Нов чат':'💬 Пълен разговор');
+   chat.type='button';chat.disabled=!c.has_chat;
+   if(!c.has_chat)chat.textContent='💬 Няма транскрипция';
+   chat.addEventListener('click',async()=>{
+    openTranscript(c.call_sid,chat);
+    try{await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'chat'})}catch{}
+   });
+   audio.addEventListener('click',async()=>{
+    audio.disabled=true;audio.textContent='🔒 Отварям частния запис...';
+    try{
+     let source,objectUrl=null;
+     if(c.browser_recording_id){
+      const result=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(c.browser_recording_id));
+      source=result.url;
+     }else if(c.provider_recording_sid){
+      const auth=await jwt();
+      const url=endp('live-audio')+'?sid='+encodeURIComponent(c.call_sid)+'&recording_sid='+encodeURIComponent(c.provider_recording_sid);
+      const response=await fetch(url,{headers:{Authorization:'Bearer '+auth},cache:'no-store'});
+      if(!response.ok)throw Error('Няма администраторски достъп до аудиото');
+      objectUrl=URL.createObjectURL(await response.blob());source=objectUrl;
+     }else throw Error('Няма потвърден аудиофайл');
+     const old=card.querySelector('audio.sf-admin-private-audio');
+     if(old){old.pause();if(old.dataset.objectUrl)URL.revokeObjectURL(old.dataset.objectUrl);old.remove()}
+     const player=el('audio','sf-admin-private-audio');
+     player.controls=true;player.preload='metadata';player.src=source;
+     if(objectUrl)player.dataset.objectUrl=objectUrl;
+     player.setAttribute('aria-label','Запис на '+(c.worker_name||'оператор')+' към '+(c.company?.company_name||'клиент'));
+     player.addEventListener('error',()=>{audio.textContent='Грешка при възпроизвеждането. Отвори записа отново.'},{once:true});
+     card.append(player);audio.textContent='🎧 Обнови аудиото';
+     await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'audio'});
+    }catch(error){audio.textContent='Записът не се отвори: '+error.message}
+    finally{audio.disabled=false}
+   });
+   row.append(audio,chat);card.append(row);
+   list.append(card);
+  }
+ }
  async function load(){
-  if(busy||!section.isConnected)return;busy=true;reload.disabled=true;
+  if(loading||!section.isConnected)return;
+  loading=true;refresh.disabled=true;
   try{
    const data=await api(endp('admin-inbox'));
-   counters.textContent='New Audio: '+(data.unread_audio||0)+' · New Chat: '+(data.unread_chat||0);
-   list.replaceChildren();
-   if(!data.calls?.length){list.append(el('p','muted','Няма реални входящи записи.'));return}
-   for(const c of data.calls){
-    const card=el('article','sf-sales-item');
-    card.append(el('strong','',c.worker_name+' · '+(c.company?.company_name||'Фирма не е избрана')),el('p','muted',date(c.started_at)+' · '+c.state));
-    const actions=el('div','sf-sales-row');
-    const chat=el('button','btn subtle',(c.new_chat?'● New Chat':'💬 Chat')+(c.has_chat?'':' (без транскрипция)'));
-    chat.disabled=!c.has_chat;
-    chat.addEventListener('click',()=>{openTranscript(c.call_sid,chat);c.new_chat=false;setTimeout(load,700)});
-    const audio=el('button','btn subtle',(c.new_audio?'● New Audio':'🎧 Audio')+(c.has_audio?'':' (няма запис)'));
-    audio.disabled=!c.has_audio;
-    audio.addEventListener('click',async()=>{
-     if(!c.browser_recording_id){openTranscript(c.call_sid,audio);return}
-     audio.disabled=true;audio.textContent='Проверявам частния запис...';
-     try{
-      const result=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(c.browser_recording_id));
-      const player=el('audio','sf-admin-private-audio');player.controls=true;player.preload='none';player.src=result.url;
-      const existing=card.querySelector('.sf-admin-private-audio');
-      if(existing)existing.remove();
-      card.append(player);
-      audio.textContent='🎧 Частен запис · 60 сек. достъп';
-      await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'audio'});
-     }catch(error){audio.textContent='Аудиото не е достъпно: '+error.message}
-     finally{audio.disabled=false}
-    });
-    const note=el('button','btn subtle','Пълен запис');
-    note.addEventListener('click',()=>openTranscript(c.call_sid,note));
-    actions.append(chat,audio,note);card.append(actions);list.append(card);
-   }
-  }catch(error){list.replaceChildren(el('p','muted','Админ опашката не е достъпна: '+error.message))}
-  finally{busy=false;reload.disabled=false}
+   latest=Array.isArray(data.calls)?data.calls:[];
+   counters.textContent='Общо: '+(data.total||0)+' · Аудио: '+(data.audio_ready||0)+
+    ' · Нови аудио: '+(data.unread_audio||0)+' · Нови чатове: '+(data.unread_chat||0);
+   lastFetch=Date.now();
+   render();
+  }catch(error){list.replaceChildren(el('p','muted','Административната история не се зареди: '+error.message))}
+  finally{loading=false;refresh.disabled=false}
  }
- reload.addEventListener('click',load);load();
+ search.addEventListener('input',render);
+ onlyAudio.addEventListener('change',render);
+ refresh.addEventListener('click',load);
+ load();
+ const timer=setInterval(()=>{
+  if(!section.isConnected){clearInterval(timer);return}
+  if(document.visibilityState!=='visible'||section.offsetParent===null||loading)return;
+  if(list.querySelector('audio'))return; // Never interrupt an administrator listening to a recording.
+  if(Date.now()-lastFetch>12000)load();
+ },4500);
 }
 let scheduled=false;
 const observer=new MutationObserver(()=>{
@@ -490,6 +594,22 @@ css.textContent=`
 .sf-sales-outcome label{display:block;font-weight:600;margin-bottom:12px}
 .sf-sales-outcome textarea{display:block;min-height:110px;margin-top:8px}
 .sf-sales-items{display:grid;gap:12px;margin-top:14px}\n.sf-admin-private-audio{width:100%;margin-top:12px}
+.sf-admin-call-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 4px}
+.sf-admin-call-filters input[type=search]{flex:1 1 300px;min-width:180px}
+.sf-admin-audio-filter{display:flex;align-items:center;gap:6px;color:#29446b;font-size:14px}
+.sf-admin-audit-card{border-left:4px solid #0fa99f;padding:18px}
+.sf-admin-audit-heading{display:flex;align-items:start;justify-content:space-between;gap:10px}
+.sf-admin-identity{display:flex;flex-direction:column;gap:4px}
+.sf-admin-call-state{border-radius:99px;background:#e7f1ff;color:#254970;font-size:12px;padding:5px 11px}
+.sf-admin-company{margin:12px 0!important;font-size:18px}
+.sf-admin-call-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px;padding:12px;background:#f5f8ff;border:1px solid #e0e8f6;border-radius:12px}
+.sf-admin-call-fact{display:flex;flex-direction:column;gap:4px;font-size:13px;overflow-wrap:anywhere}
+.sf-admin-outcome-note,.sf-admin-transcript-preview{padding:10px 13px;margin-top:12px;border-radius:12px;background:#f7f9fd;white-space:pre-wrap;overflow-wrap:anywhere}
+.sf-admin-outcome-note p,.sf-admin-transcript-preview p{margin:5px 0 0;font-size:13px;line-height:1.6}
+.sf-admin-recording-status{margin:14px 0;padding:9px 12px;border-radius:12px;background:#eef8f6;color:#0e574a;overflow-wrap:anywhere}
+.sf-admin-call-buttons{justify-content:flex-start!important}
+.sf-admin-call-buttons button{flex:0 1 auto}
+
 .sf-sales-item{padding:15px;border:1px solid #d8e4f2;border-radius:13px;background:#fff}
 .sf-sales-item h3{margin:0}.sf-sales-feedback{margin-top:12px;padding:12px;border-radius:10px;background:#e5f5ff;white-space:pre-wrap;line-height:1.6}
 @media(max-width:780px){.sf-sales-grid{grid-template-columns:1fr}.sf-sales-phone{padding:12px}.sf-sales-phone-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-sales-phone-actions button{max-width:none}.sf-sales-right{max-height:240px}.sf-sales-options .btn{flex:1 1 100%}}
