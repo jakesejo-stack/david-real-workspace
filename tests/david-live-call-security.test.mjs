@@ -45,7 +45,7 @@ test('audio permissions are admin-only regardless of UI visibility',()=>{
  assert.equal(canAccessCallAudio(undefined),false);
  assert.equal(canAccessCallAudio('admin'),true);
 });
-for(const route of ['live-audio','call-outcome','company-history','admin-inbox','admin-mark-read']){
+for(const route of ['browser-record-prepare','browser-record-complete','browser-record-link','live-audio','call-outcome','company-history','admin-inbox','admin-mark-read']){
  test(route+' rejects unauthenticated callers before DB access',async()=>{
   const res=mockResponse();
   await handleCallIntelligence({method:'GET',headers:{},query:{}},res,route);
@@ -64,4 +64,29 @@ test('Twilio preflight never accepts a POST',async()=>{
  const res=mockResponse();
  await davIdHandler({method:'POST',headers:{},query:{action:'task-preflight'}},res);
  assert.equal(res.statusCode,405);
+});
+
+test('Twilio conference callbacks reject unsigned requests',async()=>{
+ for(const action of ['task-child-status','task-conference-status']){
+  const res=mockResponse();
+  await davIdHandler({method:'POST',headers:{},body:{AccountSid:'AC'+'0'.repeat(32),CallSid:'CA'+'0'.repeat(32)},query:{action}},res);
+  assert.equal(res.statusCode,403);
+  assert.equal(res.body.error,'invalid_twilio_signature');
+ }
+});
+test('Conference action fails closed while feature disabled',async()=>{
+ const old=process.env.DAVID_CONFERENCE_CALLS_ENABLED;
+ process.env.DAVID_CONFERENCE_CALLS_ENABLED='false';
+ try{
+  for(const action of ['task-control-status','task-hold','task-transfer']){
+   const res=mockResponse();
+   const method=action==='task-control-status'?'GET':'POST';
+   await davIdHandler({method,headers:{},query:{action},body:{}},res);
+   assert.equal(res.statusCode,409);
+   assert.equal(res.body.error,'conference_mode_not_activated');
+  }
+ }finally{
+  if(old===undefined)delete process.env.DAVID_CONFERENCE_CALLS_ENABLED;
+  else process.env.DAVID_CONFERENCE_CALLS_ENABLED=old;
+ }
 });
