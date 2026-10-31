@@ -31,6 +31,7 @@ function dialReject(res,message){
  res.setHeader('Cache-Control','no-store');
  return res.status(200).send(t.toString());
 }
+const dailyCallLimit=task=>Math.max(0,Math.min(2,Number(task?.target_calls)||0));
 async function taskWorker(db,userId){
  const [identity,member,task]=await Promise.all([
   db.from('david_worker_identities').select('active').eq('user_id',userId).maybeSingle(),
@@ -53,11 +54,12 @@ async function handleTaskPreflight(req,res){
  const phone=getTaskNumber(task);
  const approved=!!task&&!!phone&&permittedNumber(phone);
  const {data:attempts,error:ae}=await db.from('david_task_call_attempts')
-  .select('id').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(1);
+  .select('attempt_number').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(2);
  if(ae)return response(res,503,{error:'attempt_check_unavailable'});
  const configurationPresent=taskConfigKeys.every(k=>!!process.env[k]);
  const enabled=process.env.LIVE_CALLS_ENABLED==='true';
- const state={configurationPresent,enabled,taskApproved:approved,attemptsRemaining:!(attempts||[]).length?1:0,
+ const remaining=Math.max(0,dailyCallLimit(task)-(attempts||[]).length);
+ const state={configurationPresent,enabled,taskApproved:approved,attemptsRemaining:remaining,
   targetMasked:phone?phone.slice(0,4)+'••••'+phone.slice(-4):null,
   accountValid:false,apiKeyValid:false,twimlUrlCorrect:false,callerIdVerified:false,
   trialRecipientVerified:null,accountType:null,errors:[]};
@@ -123,15 +125,16 @@ async function handleTaskToken(req,res){
   const phone=getTaskNumber(task);
   if(!task||!permittedNumber(phone))return response(res,403,{error:'no_approved_dial_target'});
   const db=serviceClient();
-  const {data:used,error:usedError}=await db.from('david_task_call_attempts').select('id').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(1);
+  const {data:used,error:usedError}=await db.from('david_task_call_attempts').select('attempt_number').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(2);
   if(usedError)return response(res,503,{error:'limit_check_unavailable'});
-  if(used?.length)return response(res,409,{error:'daily_call_already_attempted'});
+  const remaining=Math.max(0,dailyCallLimit(task)-(used||[]).length);
+  if(!remaining)return response(res,409,{error:'daily_call_already_attempted'});
   const {AccessToken}=twilio.jwt;
   const token=new AccessToken(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_API_KEY_SID,process.env.TWILIO_API_KEY_SECRET,{
     identity:'dpp-task-'+ctx.user.id,ttl:600
   });
   token.addGrant(new AccessToken.VoiceGrant({outgoingApplicationSid:process.env.TWILIO_TASK_TWIML_APP_SID,incomingAllow:false}));
-  return response(res,200,{token:token.toJwt(),dialTo:phone,taskId:task.id,remainingCalls:1});
+  return response(res,200,{token:token.toJwt(),dialTo:phone,taskId:task.id,remainingCalls:remaining});
  }catch{return response(res,503,{error:'task_token_unavailable'})}
 }
 async function handleTaskVoice(req,res){
@@ -147,8 +150,15 @@ async function handleTaskVoice(req,res){
   const task=await taskWorker(db,id);
   const phone=getTaskNumber(task);
   if(!task||!permittedNumber(phone))return dialReject(res,'No approved daily calling task.');
+  // Historical attempts remain intact. A unique numbered DB slot prevents concurrent retries.
+  const {data:prior,error:priorError}=await db.from('david_task_call_attempts')
+   .select('attempt_number').eq('worker_user_id',id).eq('task_date',dialDay()).order('attempt_number',{ascending:false}).limit(1);
+  if(priorError)return dialReject(res,'Daily call limit check failed.');
+  const nextAttempt=(prior?.[0]?.attempt_number||0)+1;
+  if(nextAttempt>dailyCallLimit(task))return dialReject(res,'Daily call limit reached.');
   const {error}=await db.from('david_task_call_attempts').insert({
-   worker_user_id:id,task_id:task.id,task_date:dialDay(),target_phone:phone,parent_call_sid:sid,status:'initiated'
+   worker_user_id:id,task_id:task.id,task_date:dialDay(),target_phone:phone,parent_call_sid:sid,
+   status:'initiated',attempt_number:nextAttempt
   });
   if(error)return dialReject(res,'Daily calling limit or verification failed.');
   // A REAL Twilio parent CallSid creates one durable session. Do not create sample calls.
