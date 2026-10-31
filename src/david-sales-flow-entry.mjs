@@ -54,11 +54,20 @@ async function startApprovedCall(status){
   dev.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);});
   const call=await dev.connect({params:{taskId:task.taskId}});
   callingCall=call;
+  let finished=false;
   const finish=()=>{
+   if(finished)return;
+   finished=true;
+   // Remote and local hang-up must emit exactly one post-call event.
    stopBrowserRecording();
-    if(callingCall===call)callingCall=null;
+   const sid=String(call.parameters?.CallSid||'');
+   if(callingCall===call)callingCall=null;
    if(callingDevice===dev){try{dev.destroy()}catch{}callingDevice=null;}
-   activeCallStatus='Разговорът приключи. Попълни резултата и бележката.';status(activeCallStatus);
+   activeCallStatus='✓ Call ended · Разговорът приключи. Попълни резултата и бележката.';
+   status(activeCallStatus);
+   document.dispatchEvent(new CustomEvent('david:call-ended',{detail:{
+    callSid:/^CA[0-9a-f]{32}$/i.test(sid)?sid:null,endedAt:Date.now()
+   }}));
   };
   call.on('ringing',()=>{activeCallStatus='☎ Звъни...';status(activeCallStatus)});
   call.on('accept',()=>{activeCallStatus='● Реален разговор през Twilio';status(activeCallStatus)});
