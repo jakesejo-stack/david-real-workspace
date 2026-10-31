@@ -112,6 +112,36 @@ export async function handleConferenceControl(req,res,action){
  }
  return response(res,200,{success:true,transfer_status:'dialing'});
 }
+
+async function closeOperatorOnCustomerHangup(db,sid,status){
+ // A Conference customer leg can finish while the browser operator remains alone in the room.
+ // Honor only Twilio-signed terminal/leave callbacks, and never end an in-progress warm transfer.
+ const {data:c,error:ce}=await db.from('david_call_conferences')
+  .select('parent_call_sid,customer_sid,transfer_sid,transfer_status')
+  .eq('customer_sid',sid).maybeSingle();
+ if(ce||!c||!callSid(c.parent_call_sid))return {closed:false};
+ if(c.transfer_status==='dialing'&&callSid(c.transfer_sid))return {closed:false,transferring:true};
+ const {data:session,error:se}=await db.from('david_live_call_sessions')
+  .select('state,ended_at').eq('call_sid',c.parent_call_sid).maybeSingle();
+ if(se||!session||session.ended_at)return {closed:false,alreadyEnded:true};
+ // Twilio must terminate the parent browser leg, so the SDK emits 'disconnect'.
+ try{
+  await client().calls(c.parent_call_sid).update({status:'completed'});
+ }catch(error){
+  // The parent can already be completing when the child webhook arrives.
+  console.warn('DAVID parent call close response',error?.status||'provider_unavailable');
+ }
+ const now=new Date().toISOString();
+ const finalState=status==='completed'?'completed':'failed';
+ const {error:liveError}=await db.from('david_live_call_sessions')
+  .update({state:finalState,ended_at:now,updated_at:now})
+  .eq('call_sid',c.parent_call_sid).is('ended_at',null);
+ const {error:attemptError}=await db.from('david_task_call_attempts')
+  .update({status:status||'completed',updated_at:now}).eq('parent_call_sid',c.parent_call_sid);
+ if(liveError||attemptError)throw Error('customer_hangup_audit_failed');
+ return {closed:true,call_sid:c.parent_call_sid};
+}
+
 export async function handleConferenceWebhook(req,res,action){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
  if(!verifyWebhook(req,action))return response(res,403,{error:'invalid_twilio_signature'});
@@ -120,12 +150,27 @@ export async function handleConferenceWebhook(req,res,action){
  const db=serviceClient();
  if(action==='task-child-status'){
   const status=String(req.body?.CallStatus||'');
+  if(status==='in-progress'){
+   const {data:c}=await db.from('david_call_conferences').select('parent_call_sid')
+    .eq('customer_sid',sid).maybeSingle();
+   if(c)await db.from('david_live_call_sessions').update({state:'in-progress',updated_at:new Date().toISOString()})
+    .eq('call_sid',c.parent_call_sid).is('ended_at',null);
+  }
   if(['completed','busy','failed','no-answer','canceled'].includes(status)){
-   await db.from('david_call_conferences').update({transfer_status:'failed',updated_at:new Date().toISOString()}).eq('transfer_sid',sid).eq('transfer_status','dialing');
+   await db.from('david_call_conferences').update({transfer_status:'failed',updated_at:new Date().toISOString()})
+    .eq('transfer_sid',sid).eq('transfer_status','dialing');
+   try{await closeOperatorOnCustomerHangup(db,sid,status)}
+   catch(error){console.warn('DAVID remote-ended call state sync failed',error?.message);return response(res,503,{error:'customer_hangup_sync_failed'})}
   }
   return response(res,200,{ok:true});
  }
- if(String(req.body?.StatusCallbackEvent||'')!=='participant-join')return response(res,200,{ok:true});
+ const event=String(req.body?.StatusCallbackEvent||'');
+ if(event==='participant-leave'){
+  try{await closeOperatorOnCustomerHangup(db,sid,'completed')}
+  catch(error){console.warn('DAVID conference leave sync failed',error?.message);return response(res,503,{error:'customer_hangup_sync_failed'})}
+  return response(res,200,{ok:true});
+ }
+ if(event!=='participant-join')return response(res,200,{ok:true});
  const {data:c}=await db.from('david_call_conferences').select('*').eq('transfer_sid',sid).eq('transfer_status','dialing').maybeSingle();
  if(!c||!callSid(c.transfer_previous_sid))return response(res,200,{ok:true});
  try{await client().calls(c.transfer_previous_sid).update({status:'completed'})}
