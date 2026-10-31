@@ -1,6 +1,7 @@
 // Enhances the ORIGINAL DAVID pages, without a replacement website or fake call data.
 // Only authenticated real call sessions from Supabase appear here.
 import {createClient} from '@supabase/supabase-js';
+import {preparePlaybackBlob,formatAudioClock} from './david-audio-completeness.mjs';
 let authClient=null,authConfig=null;
 async function getToken(){
  if(!authConfig)authConfig=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
@@ -104,11 +105,17 @@ async function openCall(sid,trigger){
      if(!resp.ok)throw Error('Не мога да заредя аудиото ('+resp.status+').');
      const blob=await resp.blob();
      if(blob.size<1024||blob.size>26214400)throw Error('Невалиден или прекалено голям аудиофайл.');
+     const prepared=await preparePlaybackBlob(blob);
      if(playerBlob)URL.revokeObjectURL(playerBlob);
-     playerBlob=URL.createObjectURL(blob);
-     const audio=node('audio','david-ci-player');audio.controls=true;audio.preload='metadata';audio.src=playerBlob;
-     audio.setAttribute('aria-label','Запис на разговора с '+(c.company_name||'клиента'));
-     holder.replaceChildren(audio,node('p','muted','Натисни ▶ Play, Pause или премести времевата лента.'));
+     playerBlob=URL.createObjectURL(prepared.blob);
+     const audio=node('audio','david-ci-player');audio.controls=true;audio.preload='auto';audio.src=playerBlob;
+     audio.setAttribute('aria-label','Целият съхранен запис на разговора с '+(c.company_name||'клиента'));
+     const heardMs=prepared.durationMs||Number(browserRecording?.record_duration_ms)||null;
+     const duration=node('p','muted',heardMs?'Дължина на съхраненото аудио: '+formatAudioClock(heardMs):
+      'Целият наличен аудиофайл е зареден. Времетраенето се проверява от браузъра.');
+     const callMs=s.started_at&&s.ended_at?Date.parse(s.ended_at)-Date.parse(s.started_at):null;
+     if(heardMs&&callMs&&heardMs+8000<callMs)duration.textContent+=' · Записът е по-кратък от телефонната сесия, защото започва след съгласието.';
+     holder.replaceChildren(audio,duration,node('p','muted','▶ Play / Pause / превъртане на целия съхранен файл.'));
      playButton.textContent='↻ Зареди отново аудиото';
      callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({call_sid:sid,kind:'audio'})}).catch(()=>{});
