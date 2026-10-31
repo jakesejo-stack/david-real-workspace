@@ -226,6 +226,7 @@ function mountLive(root){
  });
  const setCallStatus=msg=>{telephoneStatus.textContent=msg;syncControls();};
  dial.addEventListener('click',async()=>{
+  dialAttemptAt=Date.now();
   dial.disabled=true;
   try{await startApprovedCall(setCallStatus);}catch(error){setCallStatus(String(error?.message||error));}
   finally{syncControls();}
@@ -364,51 +365,77 @@ function mountLive(root){
   }
  }
  async function refresh(){
-  if(!shell.isConnected||busy)return;busy=true;
+  if(!shell.isConnected||busy)return;
+  busy=true;
   try{
    const x=await api(endp('live-status'));
    conferenceEnabled=!!x.conference_controls_enabled;
    callOnHold=!!x.on_hold;
    syncControls();
-   if(activeCallStatus)telephoneStatus.textContent=activeCallStatus;
-   badge.textContent=x.active?(x.state==='in-progress'?'● В разговор':'◉ Набиране'):'Няма активен разговор';
-   badge.className='tag '+(x.active?'green':'gray');
    if(x.active){
-    lastActive=true;
+    lastActive=true;lastLiveSid=sidOk(x.call_sid)?x.call_sid:lastLiveSid;
+    if(!awaitingEnd){
+     grid.hidden=false;outcomePanel.hidden=true;
+     badge.textContent=x.state==='in-progress'?'● В разговор':'◉ Набиране';
+     badge.className='tag green';
+    }
     companyName.textContent=x.company?.company_name||'Обаждане без фирма';
     client.textContent='Клиент: '+(x.latest_customer_line||'Очаквам реплика...');
     operator.textContent='Оператор: '+(x.latest_operator_line||'Очаквам реч...');
     david.textContent='DAVID: '+(x.suggestion||'Очаквам разрешена клиентска реплика, за да предложа отговор.');
     renderLines(x.transcript);
-    const newNotes=JSON.stringify(x.recent_notes||[]);
-    if(newNotes!==lastNoteSignature){
-     lastNoteSignature=newNotes;companyNote.replaceChildren();
+    const recentNotes=JSON.stringify(x.recent_notes||[]);
+    if(recentNotes!==lastNoteSignature){
+     lastNoteSignature=recentNotes;companyNote.replaceChildren();
      if(x.recent_notes?.length)for(const n of x.recent_notes)companyNote.append(noteCard(n));
      else companyNote.append(el('p','muted','Няма предишни бележки за този бизнес.'));
     }
-    outcomePanel.hidden=true;
    }else{
+    if(lastActive&&!awaitingEnd&&lastLiveSid&&lastLiveSid!==dismissedCallSid){
+     pendingCallSid=lastLiveSid;
+     showEndedWaiting();
+    }
+    lastActive=false;
     companyName.textContent='Телефонът е свободен';
-    client.textContent='Клиент: —';operator.textContent='Оператор: —';
+    client.textContent='Клиент: —';
+    operator.textContent='Оператор: —';
     david.textContent='DAVID: Очаквам следващото обаждане.';
-    if(Date.now()-lastRecent>7500||lastActive){
-     lastRecent=Date.now();lastActive=false;
+    const due=awaitingEnd||Date.now()-lastRecent>5000;
+    if(due){
+     lastRecent=Date.now();
      const records=await api(endp('call-records'));
-     const latest=(records.calls||[]).find(c=>
+     const candidates=(records.calls||[]).filter(c=>
       ['completed','failed','canceled'].includes(c.state)&&c.ended_at&&!c.outcome&&
       c.company?.company_name&&Date.now()-new Date(c.ended_at).getTime()<86400000
      );
-     if(latest&&latest.call_sid!==currentSid){choice=null;notes.value='';message.textContent='';for(const b of buttons.values()){b.classList.remove('selected');b.setAttribute('aria-pressed','false')}}
-     currentSid=latest?.call_sid||null;
-     outcomePanel.hidden=!latest;
-     if(latest){summary.textContent=(latest.company?.company_name||'Фирма')+' · '+date(latest.ended_at)+' · '+latest.state;if(lastOutcomeScrolled!==latest.call_sid){lastOutcomeScrolled=latest.call_sid;outcomePanel.scrollIntoView({behavior:'smooth',block:'start'});}}
+     const latest=awaitingEnd?
+      (pendingCallSid?candidates.find(c=>c.call_sid===pendingCallSid):
+       candidates.find(c=>new Date(c.ended_at).getTime()>dialAttemptAt-15000)):
+      candidates.find(c=>c.call_sid!==dismissedCallSid);
+     if(latest){
+      openEndedResult(latest);
+      pendingCallSid=null;
+      if(!endedEventAt){grid.hidden=false;outcomePanel.hidden=false}
+     }else if(awaitingEnd){
+      grid.hidden=true;outcomePanel.hidden=false;
+      badge.textContent='✓ Call ended';badge.className='tag green';
+      if(Date.now()-endedEventAt>25000){
+       summary.textContent='Call ended · Очаквам потвърждение от Twilio';
+       message.textContent='Разговорът е прекъснат, но сървърът още не е потвърдил завършения запис. Провери отново след малко.';
+      }
+     }else if(!currentSid||currentSid===dismissedCallSid){
+      grid.hidden=false;outcomePanel.hidden=true;
+      badge.textContent='Няма активен разговор';badge.className='tag gray';
+     }
     }
    }
-  }catch(error){badge.textContent='Live: '+error.message;badge.className='tag orange'}
-  finally{busy=false;}
+  }catch(error){
+   if(awaitingEnd)message.textContent='Call ended · Проверка на приключването: '+error.message;
+   else{badge.textContent='Live: '+error.message;badge.className='tag orange'}
+  }finally{busy=false}
  }
  refresh();
- const timer=setInterval(()=>{if(!shell.isConnected){clearInterval(timer);return;}if(document.visibilityState==='visible'&&shell.offsetParent!==null)refresh()},1700);
+ const timer=setInterval(()=>{if(!shell.isConnected){clearInterval(timer);document.removeEventListener('david:call-ended',handleEndEvent);return;}if(document.visibilityState==='visible'&&shell.offsetParent!==null)refresh()},1700);
 }
 function mountCompanies(root){
  const title=[...root.querySelectorAll('.main h1,.main h2')].find(h=>h.textContent?.trim()==='Моите фирми');
@@ -685,6 +712,7 @@ css.textContent=`
 .sf-sales-header,.sf-sales-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
 .sf-sales-header h2{margin:0}
 .sf-sales-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(240px,.95fr);gap:16px;margin-top:16px}
+.sf-sales-grid[hidden],.sf-sales-outcome [hidden]{display:none!important}
 .sf-sales-phone{background:#f4f8ff;border:1px solid #d7e5f8;border-radius:18px;padding:18px;min-height:280px}
 .sf-sales-phone h3{font-size:22px;margin:0 0 14px}
 .sf-sales-client,.sf-sales-operator{padding:11px;background:white;border:1px solid #d8e5f5;border-radius:12px;margin:8px 0;line-height:1.5}
