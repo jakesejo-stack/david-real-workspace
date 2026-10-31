@@ -2,6 +2,7 @@
 // Every list is filled only from authenticated, real server records. No fake call or audio content.
 import {createClient} from '@supabase/supabase-js';
 import {Device} from '@twilio/voice-sdk';
+import {finalizeBrowserAudio,preparePlaybackBlob,formatAudioClock} from './david-audio-completeness.mjs';
 let client,config;
 let callingDevice=null,callingCall=null,connecting=false;
 let activeCallStatus='';
@@ -59,7 +60,7 @@ async function startApprovedCall(status){
    if(finished)return;
    finished=true;
    // Remote and local hang-up must emit exactly one post-call event.
-   stopBrowserRecording();
+   stopBrowserRecording('call_ended');
    const sid=String(call.parameters?.CallSid||'');
    if(callingCall===call)callingCall=null;
    if(callingDevice===dev){try{dev.destroy()}catch{}callingDevice=null;}
@@ -70,7 +71,7 @@ async function startApprovedCall(status){
    }}));
   };
   call.on('ringing',()=>{activeCallStatus='☎ Звъни...';status(activeCallStatus)});
-  call.on('accept',()=>{activeCallStatus='● Реален разговор през Twilio';status(activeCallStatus)});
+  call.on('accept',()=>{activeCallStatus='● Свързано. Поискай съгласие и натисни ⏺ Запис, за да запишеш всичко до Call ended.';status(activeCallStatus)});
   call.on('disconnect',finish);call.on('cancel',finish);call.on('reject',finish);
   call.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);finish()});
   activeCallStatus='☎ Набиране на '+task.dialTo;status(activeCallStatus);
@@ -124,37 +125,44 @@ async function beginBrowserRecording(status,updateControls){
  try{recorder=new MediaRecorder(mix.stream,{mimeType:mime,audioBitsPerSecond:64000})}
  catch(e){await ctx.close();throw Error('MediaRecorder: '+e.message)}
  const chunks=[];let bytes=0;
- const entry={recorder,ctx,mix,upload,uploading:false};
+ const entry={recorder,ctx,mix,upload,uploading:false,startedMono:0,stopReason:null};
  browserRecording=entry;
  recorder.ondataavailable=e=>{
   if(e.data?.size){chunks.push(e.data);bytes+=e.data.size}
-  if(bytes>26214400&&recorder.state!=='inactive'){status('25 MB лимит. Спирам записа.');recorder.stop()}
+  if(bytes>26214400&&recorder.state!=='inactive'){status('25 MB лимит. Спирам записа.');entry.stopReason='limit';recorder.stop()}
  };
  recorder.onerror=e=>status('Грешка от браузърния recorder: '+(e.error?.message||'audio_error'));
  recorder.onstop=async()=>{
   entry.uploading=true;updateControls();
+  const elapsedMs=Math.max(1,Math.round(performance.now()-(entry.startedMono||performance.now())));
   try{await ctx.close()}catch{}
   for(const track of mix.stream.getTracks())track.stop();
   if(!chunks.length){status('Няма аудиоданни. Нищо не е запазено.');entry.uploading=false;updateControls();return}
-  const blob=new Blob(chunks,{type:mimeType});
+  const captured=new Blob(chunks,{type:mimeType});
+  const blob=await finalizeBrowserAudio(captured,elapsedMs);
   if(blob.size>26214400){status('Записът е над лимита 25 MB.');entry.uploading=false;updateControls();return}
   status('Качвам двата гласа в частното хранилище на DAVID...');
   try{
    const {error}=await client.storage.from(upload.bucket).uploadToSignedUrl(upload.path,upload.token,blob,{contentType:mimeType});
    if(error)throw error;
-   const result=await api(endp('browser-record-complete'),'POST',{recording_id:upload.recording_id});
+   const result=await api(endp('browser-record-complete'),'POST',{
+    recording_id:upload.recording_id,duration_ms:elapsedMs,
+    ended_reason:entry.stopReason||'track_ended'
+   });
    if(!result.saved)throw Error('Сървърът не потвърди запис');
-   status('✓ Записът е запазен в Supabase. Аудиото е достъпно само за администратори.');
+   status('✓ Целият заснет звук ('+formatAudioClock(elapsedMs)+') е запазен в Supabase. Аудиото е достъпно само за администратори.');
   }catch(e){status('Записът не се съхрани: '+e.message+'. Няма да твърдим, че е качен.')}
   finally{entry.uploading=false;if(browserRecording===entry)browserRecording=null;updateControls()}
  };
  recorder.start(1000);
- status('🔴 Записвам оператора и клиента локално чрез MediaRecorder, с изрично съгласие.');
+ entry.startedMono=performance.now();
+ status('🔴 Записвам двата гласа непрекъснато след съгласието, до Call ended. Не затваряй страницата.');
  updateControls();return true;
 }
-function stopBrowserRecording(){
- const rec=browserRecording?.recorder;
+function stopBrowserRecording(reason='call_ended'){
+ const entry=browserRecording,rec=entry?.recorder;
  if(!rec||rec.state==='inactive')return false;
+ entry.stopReason=reason;
  try{rec.stop()}catch{return false}
  return true;
 }
@@ -204,6 +212,9 @@ function mountLive(root){
  dial.disabled=false;record.disabled=hold.disabled=transfer.disabled=hangup.disabled=true;
  let conferenceEnabled=false,callOnHold=false;
  const syncControls=()=>{
+  if(browserRecordingActive()&&browserRecording?.startedMono>0){
+   recordClock.textContent='🔴 Записва непрекъснато · '+formatAudioClock(performance.now()-browserRecording.startedMono)+' от потвърденото съгласие до края на разговора.';
+  }else if(browserRecording?.uploading){recordClock.textContent='⌛ Качвам целия запис в частното хранилище...'}
   dial.disabled=connecting||!!callingCall;
   hangup.disabled=!callingCall;
   record.disabled=!callingCall||!!browserRecording?.uploading||!!browserRecording?.recorder&&browserRecording.recorder.state==='inactive';
@@ -213,6 +224,7 @@ function mountLive(root){
   hold.textContent=callOnHold?'▶ Върни':'⏸ Задържане';
  };
  const telephoneStatus=el('p','sf-sales-call-status','Само разрешени задачи и номера от DAVID. Нужни са Twilio credentials и разрешен микрофон.');
+ const recordClock=el('p','sf-sales-record-clock','Записът започва след съгласие и продължава до Call ended.');
  const preflightButton=el('button','btn subtle','Провери Twilio');
  preflightButton.type='button';
  preflightButton.addEventListener('click',async()=>{
@@ -234,7 +246,9 @@ function mountLive(root){
  hangup.addEventListener('click',()=>{if(endApprovedCall())setCallStatus('Прекратяване на обаждането...')});
  record.addEventListener('click',async()=>{
   record.disabled=true;
-  try{if(browserRecordingActive()){stopBrowserRecording();setCallStatus('Спирам и качвам записа...')}
+  try{if(browserRecordingActive()){
+    if(!window.confirm('Ако спреш сега, записът ще бъде частичен и няма да съдържа остатъка от разговора. Сигурен ли си?'))return;
+    stopBrowserRecording('manual_stop');setCallStatus('Спирам и качвам частичния запис...')}
    else await beginBrowserRecording(setCallStatus,syncControls)}
   catch(error){setCallStatus('Записът не започна: '+error.message)}
   finally{syncControls()}
@@ -243,10 +257,7 @@ function mountLive(root){
   if(!callingCall)return;hold.disabled=true;
   try{const result=await api(endp('task-hold'),'POST',{call_sid:await currentLiveSid(),hold:!callOnHold});
    callOnHold=result.hold===true;
-   const rec=browserRecording?.recorder;
-   if(rec?.state==='recording'&&callOnHold)rec.pause();
-   if(rec?.state==='paused'&&!callOnHold)rec.resume();
-   setCallStatus(callOnHold?'⏸ Клиентът е задържан. Записът е паузиран.':'▶ Разговорът продължава.')}
+   setCallStatus(callOnHold?'⏸ Клиентът е задържан. Записът продължава непрекъснато.':'▶ Разговорът продължава и записът продължава.')}
   catch(error){setCallStatus('Задържането не е изпълнено: '+error.message)}
   finally{syncControls()}
  });
@@ -261,7 +272,7 @@ function mountLive(root){
   finally{syncControls()}
  });
  phoneActions.append(dial,record,hold,transfer,hangup);
- call.append(companyName,client,operator,david,timeline,phoneActions,preflightButton,telephoneStatus);
+ call.append(companyName,client,operator,david,timeline,phoneActions,preflightButton,telephoneStatus,recordClock);
  const right=el('aside','sf-sales-right');
  right.append(el('h3','','Последни бележки за бизнеса'));
  const companyNote=el('div','sf-sales-notes');companyNote.append(el('p','muted','Бележките се появяват само за назначената фирма.'));
@@ -722,6 +733,7 @@ css.textContent=`
 .sf-sales-line{background:white;border-radius:10px;padding:10px;margin:6px 0;line-height:1.5}
 .sf-sales-line.client{background:#fff5e6}
 .sf-sales-phone-actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:16px auto}
+.sf-sales-record-clock{font-size:13px;color:#19526b;font-weight:600;margin-top:8px}
 .sf-sales-phone-actions button{min-width:0;max-width:none;min-height:48px;font-size:14px;white-space:normal;padding:8px 5px}
 .sf-record-btn{background:#ffebed!important;color:#9d1f2a!important;border:1px solid #efb8bb!important}
 .sf-hold-btn{background:#fff1ce!important;color:#805505!important;border:1px solid #e8cb8b!important}
