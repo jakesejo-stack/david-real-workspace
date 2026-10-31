@@ -353,30 +353,84 @@ async function adminInbox(req,res,a){
  if(a.role!=='admin')return response(res,403,{error:'admin_required'});
  if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
  const {data:calls,error:ce}=await a.db.from('david_live_call_sessions')
-  .select('call_sid,worker_user_id,company_snapshot,started_at,ended_at,state')
+  .select('call_sid,worker_user_id,company_snapshot,started_at,ended_at,state,recording_consent_at,transcription_consent_at')
   .order('started_at',{ascending:false}).limit(100);
  if(ce)return response(res,503,{error:'inbox_unavailable'});
- const ids=(calls||[]).map(x=>x.call_sid);
- if(!ids.length)return response(res,200,{calls:[],unread_audio:0,unread_chat:0});
- const [{data:records,error:re},{data:segments,error:se},{data:reads,error:ae},{data:members,error:me},{data:browserRecords,error:be}]=await Promise.all([
-  a.db.from('david_recordings').select('call_sid,recording_sid,status').in('call_sid',ids).eq('status','completed'),
-  a.db.from('david_live_transcript_segments').select('call_sid,id').in('call_sid',ids).order('id',{ascending:false}).limit(600),
+ const ids=(calls||[]).map(c=>c.call_sid);
+ if(!ids.length)return response(res,200,{calls:[],unread_audio:0,unread_chat:0,total:0,audio_ready:0});
+ const workerIds=[...new Set((calls||[]).map(c=>c.worker_user_id))];
+ const [
+  {data:provider,error:providerError},
+  {data:segments,error:segmentError},
+  {data:reads,error:readError},
+  {data:members,error:memberError},
+  {data:browser,error:browserError},
+  {data:attempts,error:attemptError},
+  {data:outcomes,error:outcomeError},
+  {data:profiles,error:profileError}
+ ]=await Promise.all([
+  a.db.from('david_recordings').select('call_sid,recording_sid,status,created_at').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
+  a.db.from('david_live_transcript_segments').select('call_sid,id,speaker,content,created_at').in('call_sid',ids).order('id',{ascending:false}).limit(800),
   a.db.from('david_admin_call_inbox_reads').select('call_sid,chat_seen_at,audio_seen_at').eq('admin_user_id',a.user.id).in('call_sid',ids),
-  a.db.from('david_members').select('user_id,display_name').in('user_id',[...new Set((calls||[]).map(x=>x.worker_user_id))]),
-  a.db.from('david_browser_recordings').select('id,call_sid').in('call_sid',ids).eq('status','completed')
+  a.db.from('david_members').select('user_id,display_name').in('user_id',workerIds),
+  a.db.from('david_browser_recordings').select('id,call_sid,status,byte_size,created_at,completed_at,consent_at').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
+  a.db.from('david_task_call_attempts').select('parent_call_sid,target_phone,status,duration_seconds,created_at').in('parent_call_sid',ids),
+  a.db.from('david_live_call_outcomes').select('call_sid,disposition,notes,updated_at').in('call_sid',ids),
+  a.db.from('david_ai_profiles').select('user_id,full_name,gmail').in('user_id',workerIds)
  ]);
- if(re||se||ae||me||be)return response(res,503,{error:'inbox_meta_unavailable'});
- const browserAudio=new Map((browserRecords||[]).map(x=>[x.call_sid,x.id]));
- const hasAudio=new Set([...(records||[]).map(x=>x.call_sid),...browserAudio.keys()]),hasChat=new Set((segments||[]).map(x=>x.call_sid));
- const read=new Map((reads||[]).map(x=>[x.call_sid,x])),names=new Map((members||[]).map(x=>[x.user_id,x.display_name]));
- const result=(calls||[]).map(x=>({
-  call_sid:x.call_sid,worker_user_id:x.worker_user_id,worker_name:names.get(x.worker_user_id)||'Оператор',
-  company:safeCompany(x.company_snapshot),started_at:x.started_at,ended_at:x.ended_at,state:x.state,
-  has_audio:hasAudio.has(x.call_sid),browser_recording_id:browserAudio.get(x.call_sid)||null,has_chat:hasChat.has(x.call_sid),
-  new_audio:hasAudio.has(x.call_sid)&&!read.get(x.call_sid)?.audio_seen_at,
-  new_chat:hasChat.has(x.call_sid)&&!read.get(x.call_sid)?.chat_seen_at
- }));
- return response(res,200,{calls:result,unread_audio:result.filter(x=>x.new_audio).length,unread_chat:result.filter(x=>x.new_chat).length});
+ if(providerError||segmentError||readError||memberError||browserError||attemptError||outcomeError||profileError)
+  return response(res,503,{error:'inbox_meta_unavailable'});
+ const firstByCall=rows=>new Map((rows||[]).map(r=>[r.call_sid,r]));
+ const browserMap=firstByCall(browser),providerMap=firstByCall(provider),attemptMap=firstByCall(attempts);
+ const outcomeMap=firstByCall(outcomes),seenMap=firstByCall(reads);
+ const membersById=new Map((members||[]).map(m=>[m.user_id,m.display_name]));
+ const profilesById=new Map((profiles||[]).map(p=>[p.user_id,p]));
+ const transcriptByCall=new Map();
+ for(const line of (segments||[])){
+  const lines=transcriptByCall.get(line.call_sid)||[];
+  if(lines.length<3)lines.push({speaker:line.speaker,content:String(line.content||'').slice(0,350)});
+  transcriptByCall.set(line.call_sid,lines);
+ }
+ const result=(calls||[]).map(c=>{
+  const saved=browserMap.get(c.call_sid),twilioRecording=providerMap.get(c.call_sid),
+   attempt=attemptMap.get(c.call_sid),outcome=outcomeMap.get(c.call_sid),
+   seen=seenMap.get(c.call_sid),profile=profilesById.get(c.worker_user_id)||{};
+  const browserComplete=saved?.status==='completed';
+  const providerComplete=twilioRecording?.status==='completed';
+  const audioReady=browserComplete||providerComplete;
+  const transcript=transcriptByCall.get(c.call_sid)||[];
+  const calculatedDuration=c.ended_at&&c.started_at
+   ?Math.max(0,Math.round((Date.parse(c.ended_at)-Date.parse(c.started_at))/1000)):null;
+  const duration=Number.isInteger(attempt?.duration_seconds)?attempt.duration_seconds:calculatedDuration;
+  return {
+   call_sid:c.call_sid,worker_user_id:c.worker_user_id,
+   worker_name:String(profile.full_name||membersById.get(c.worker_user_id)||'Оператор').slice(0,150),
+   worker_email:typeof profile.gmail==='string'?profile.gmail.slice(0,200):null,
+   company:safeCompany(c.company_snapshot),
+   dialed_number:attempt?.target_phone||c.company_snapshot?.contact_phone||null,
+   started_at:c.started_at,ended_at:c.ended_at,state:c.state,
+   duration_seconds:Number.isFinite(duration)?duration:null,
+   call_provider_status:attempt?.status||null,
+   outcome:outcome?{disposition:outcome.disposition,notes:outcome.notes||'',updated_at:outcome.updated_at}:null,
+   recording_status:browserComplete?'completed':saved?.status|| (providerComplete?'completed':twilioRecording?.status||'not_started'),
+   recording_started_at:saved?.created_at||twilioRecording?.created_at||null,
+   recording_completed_at:saved?.completed_at||null,
+   recording_bytes:Number(saved?.byte_size)||null,
+   browser_recording_id:browserComplete?saved.id:null,
+   provider_recording_sid:providerComplete?twilioRecording.recording_sid:null,
+   recording_consent:!!c.recording_consent_at,
+   has_audio:audioReady,has_chat:transcript.length>0,
+   transcript_preview:transcript.reverse(),
+   new_audio:audioReady&&!seen?.audio_seen_at,
+   new_chat:transcript.length>0&&!seen?.chat_seen_at
+  };
+ });
+ noStore(res);
+ return response(res,200,{
+  calls:result,total:result.length,audio_ready:result.filter(c=>c.has_audio).length,
+  unread_audio:result.filter(c=>c.new_audio).length,
+  unread_chat:result.filter(c=>c.new_chat).length
+ });
 }
 async function adminMarkRead(req,res,a){
  if(a.role!=='admin')return response(res,403,{error:'admin_required'});
