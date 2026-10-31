@@ -519,6 +519,10 @@ function mountAdmin(root){
     c.dialed_number,c.outcome?.notes,c.outcome?.disposition].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
    return !term||searchable.includes(term);
   });
+  for(const oldPlayer of list.querySelectorAll('audio.sf-admin-private-audio')){
+   oldPlayer.pause();
+   if(oldPlayer.src.startsWith('blob:'))URL.revokeObjectURL(oldPlayer.src);
+  }
   list.replaceChildren();
   if(!filtered.length){
    list.append(el('p','muted',latest.length?'Няма разговори по този филтър.':'Все още няма реални разговори.'));
@@ -603,7 +607,7 @@ function mountAdmin(root){
  const timer=setInterval(()=>{
   if(!section.isConnected){clearInterval(timer);return}
   if(document.visibilityState!=='visible'||section.offsetParent===null||loading)return;
-  if(list.querySelector('audio'))return; // Never interrupt an administrator listening to a recording.
+  if(list.querySelector('details.sf-admin-audio-panel[open]'))return; // Keep the expanded player mounted while listening.
   if(Date.now()-lastFetch>12000)load();
  },4500);
 }
