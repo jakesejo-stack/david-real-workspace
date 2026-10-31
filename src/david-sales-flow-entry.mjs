@@ -419,7 +419,20 @@ function mountAdmin(root){
     chat.addEventListener('click',()=>{openTranscript(c.call_sid,chat);c.new_chat=false;setTimeout(load,700)});
     const audio=el('button','btn subtle',(c.new_audio?'● New Audio':'🎧 Audio')+(c.has_audio?'':' (няма запис)'));
     audio.disabled=!c.has_audio;
-    audio.addEventListener('click',()=>openTranscript(c.call_sid,audio));
+    audio.addEventListener('click',async()=>{
+     if(!c.browser_recording_id){openTranscript(c.call_sid,audio);return}
+     audio.disabled=true;audio.textContent='Проверявам частния запис...';
+     try{
+      const result=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(c.browser_recording_id));
+      const player=el('audio','sf-admin-private-audio');player.controls=true;player.preload='none';player.src=result.url;
+      const existing=card.querySelector('.sf-admin-private-audio');
+      if(existing)existing.remove();
+      card.append(player);
+      audio.textContent='🎧 Частен запис · 60 сек. достъп';
+      await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'audio'});
+     }catch(error){audio.textContent='Аудиото не е достъпно: '+error.message}
+     finally{audio.disabled=false}
+    });
     const note=el('button','btn subtle','Пълен запис');
     note.addEventListener('click',()=>openTranscript(c.call_sid,note));
     actions.append(chat,audio,note);card.append(actions);list.append(card);
@@ -470,7 +483,7 @@ css.textContent=`
 .sf-sales-choice.selected{background:#176fff!important;color:white!important;border-color:#176fff}
 .sf-sales-outcome label{display:block;font-weight:600;margin-bottom:12px}
 .sf-sales-outcome textarea{display:block;min-height:110px;margin-top:8px}
-.sf-sales-items{display:grid;gap:12px;margin-top:14px}
+.sf-sales-items{display:grid;gap:12px;margin-top:14px}\n.sf-admin-private-audio{width:100%;margin-top:12px}
 .sf-sales-item{padding:15px;border:1px solid #d8e4f2;border-radius:13px;background:#fff}
 .sf-sales-item h3{margin:0}.sf-sales-feedback{margin-top:12px;padding:12px;border-radius:10px;background:#e5f5ff;white-space:pre-wrap;line-height:1.6}
 @media(max-width:780px){.sf-sales-grid{grid-template-columns:1fr}.sf-sales-phone{padding:12px}.sf-sales-phone-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-sales-phone-actions button{max-width:none}.sf-sales-right{max-height:240px}.sf-sales-options .btn{flex:1 1 100%}}
