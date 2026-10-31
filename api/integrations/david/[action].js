@@ -2,14 +2,17 @@
 import {authorizedBridge,serviceClient,jsonBody,validCode,validExternalId,codeDigest,response} from '../../_david_link_shared.js';
 
 import twilio from 'twilio';
+import {handleCallIntelligence} from '../../../src/server/david-live-calls.mjs';
+import {createConferenceDial,handleConferenceControl,handleConferenceWebhook} from '../../../src/server/david-conference-controls.mjs';
 import {approvedGoogleUser} from '../../_david_link_shared.js';
 
 const taskConfigKeys=['SUPABASE_SERVICE_ROLE_KEY','TWILIO_ACCOUNT_SID','TWILIO_API_KEY_SID','TWILIO_API_KEY_SECRET','TWILIO_AUTH_TOKEN','TWILIO_TASK_TWIML_APP_SID','TWILIO_FROM_NUMBER','PUBLIC_ORIGIN','DPP_TASK_ALLOWED_NUMBERS'];
 const taskReady=()=>process.env.LIVE_CALLS_ENABLED==='true'&&taskConfigKeys.every(k=>!!process.env[k]);
 const dialDay=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Europe/Sofia',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return v.year+'-'+v.month+'-'+v.day;};
-const bgNumber=s=>{const t=String(s||'').replace(/[ .()-]/g,'');return /^\+359\d{9}$/.test(t)?t:/^0\d{9}$/.test(t)?'+359'+t.slice(1):null;};
-const getTaskNumber=task=>{const found=(String(task?.instructions||'')+' '+String(task?.title||'')).match(/\+359\d{9}|(?<!\d)0\d{9}(?!\d)/);return found?bgNumber(found[0]):null;};
-const permittedNumber=n=>!!n&&(process.env.DPP_TASK_ALLOWED_NUMBERS||'').split(',').map(v=>bgNumber(v)).includes(n);
+// International E.164 numbers require exact admin allowlisting; never trust caller-provided numbers.
+const approvedPhone=s=>{const t=String(s||'').replace(/[ .()-]/g,'');return /^\+[1-9]\d{7,14}$/.test(t)?t:/^0\d{9}$/.test(t)?'+359'+t.slice(1):null;};
+const getTaskNumber=task=>{const found=(String(task?.instructions||'')+' '+String(task?.title||'')).match(/\+[1-9]\d{7,14}|(?<!\d)0\d{9}(?!\d)/);return found?approvedPhone(found[0]):null;};
+const permittedNumber=n=>!!n&&(process.env.DPP_TASK_ALLOWED_NUMBERS||'').split(',').map(v=>approvedPhone(v)).includes(n);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const callSidPattern=/^CA[0-9a-f]{32}$/i;
 const callbackUrl=action=>String(process.env.PUBLIC_ORIGIN||'').replace(/\/$/,'')+'/api/integrations/david/'+action;
@@ -28,6 +31,7 @@ function dialReject(res,message){
  res.setHeader('Cache-Control','no-store');
  return res.status(200).send(t.toString());
 }
+export const dailyCallLimit=task=>Math.max(0,Math.min(2,Number(task?.target_calls)||0));
 async function taskWorker(db,userId){
  const [identity,member,task]=await Promise.all([
   db.from('david_worker_identities').select('active').eq('user_id',userId).maybeSingle(),
@@ -38,6 +42,79 @@ async function taskWorker(db,userId){
  if(identity.data?.active!==true||!['worker','admin'].includes(member.data?.role)||!task.data||task.data.target_calls<1)return null;
  return task.data;
 }
+
+async function handleTaskPreflight(req,res){
+ if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
+ const ctx=await approvedGoogleUser(req);
+ if(!ctx)return response(res,401,{error:'google_login_required'});
+ const db=serviceClient();
+ let task;
+ try{task=await taskWorker(db,ctx.user.id)}
+ catch{return response(res,503,{error:'task_lookup_unavailable'})}
+ const phone=getTaskNumber(task);
+ const approved=!!task&&!!phone&&permittedNumber(phone);
+ const {data:attempts,error:ae}=await db.from('david_task_call_attempts')
+  .select('attempt_number').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(2);
+ if(ae)return response(res,503,{error:'attempt_check_unavailable'});
+ const configurationPresent=taskConfigKeys.every(k=>!!process.env[k]);
+ const enabled=process.env.LIVE_CALLS_ENABLED==='true';
+ const remaining=Math.max(0,dailyCallLimit(task)-(attempts||[]).length);
+ const state={configurationPresent,enabled,taskApproved:approved,attemptsRemaining:remaining,
+  targetMasked:phone?phone.slice(0,4)+'••••'+phone.slice(-4):null,
+  accountValid:false,apiKeyValid:false,twimlUrlCorrect:false,callerIdVerified:false,
+  trialRecipientVerified:null,accountType:null,errors:[]};
+ if(!configurationPresent){
+  state.errors.push('missing_server_config');
+  return response(res,200,{ready:false,...state});
+ }
+ const account=process.env.TWILIO_ACCOUNT_SID,authToken=process.env.TWILIO_AUTH_TOKEN;
+ const appSid=process.env.TWILIO_TASK_TWIML_APP_SID;
+ const from=String(process.env.TWILIO_FROM_NUMBER||'');
+ if(!/^AC[0-9a-f]{32}$/i.test(account)||!/^SK[0-9a-f]{32}$/i.test(process.env.TWILIO_API_KEY_SID)||
+    !/^AP[0-9a-f]{32}$/i.test(appSid)||!/^\+[1-9]\d{7,14}$/.test(from)){
+   state.errors.push('invalid_sid_or_caller_id_format');
+   return response(res,200,{ready:false,...state});
+ }
+ const root='https://api.twilio.com/2010-04-01/Accounts/'+account;
+ const authHeader=(user,secret)=>({Authorization:'Basic '+Buffer.from(user+':'+secret).toString('base64')});
+ async function check(url,headers){
+  try{
+   const r=await fetch(url,{headers,signal:AbortSignal.timeout(6500)});
+   if(!r.ok)return {ok:false,status:r.status};
+   return {ok:true,data:await r.json()};
+  }catch{return {ok:false,status:0}}
+ }
+ const accountAuth=authHeader(account,authToken);
+ const apiAuth=authHeader(process.env.TWILIO_API_KEY_SID,process.env.TWILIO_API_KEY_SECRET);
+ const [acc,app,verified,owned,destination]=await Promise.all([
+  check(root+'.json',accountAuth),
+  check(root+'/Applications/'+appSid+'.json',apiAuth),
+  check(root+'/OutgoingCallerIds.json?PhoneNumber='+encodeURIComponent(from),accountAuth),
+  check(root+'/IncomingPhoneNumbers.json?PhoneNumber='+encodeURIComponent(from),accountAuth),
+  approved?check(root+'/OutgoingCallerIds.json?PhoneNumber='+encodeURIComponent(phone),accountAuth):Promise.resolve({ok:false})
+ ]);
+ state.accountValid=acc.ok&&acc.data?.status==='active';
+ state.accountType=acc.ok?String(acc.data?.type||'unknown').slice(0,30):null;
+ state.apiKeyValid=app.ok;
+ state.twimlUrlCorrect=app.ok&&String(app.data?.voice_url||'').replace(/\/$/,'')===callbackUrl('task-voice')&&
+  String(app.data?.voice_method||'POST').toUpperCase()==='POST';
+ state.callerIdVerified=(verified.ok&&verified.data?.outgoing_caller_ids?.some(x=>x.phone_number===from))||
+  (owned.ok&&owned.data?.incoming_phone_numbers?.some(x=>x.phone_number===from))||false;
+ state.trialRecipientVerified=String(state.accountType||'').toLowerCase()==='trial'?
+  (destination.ok&&destination.data?.outgoing_caller_ids?.some(x=>x.phone_number===phone)) : null;
+ if(!state.accountValid)state.errors.push('twilio_account_auth_invalid');
+ if(!state.apiKeyValid)state.errors.push('twilio_api_key_invalid');
+ if(!state.twimlUrlCorrect)state.errors.push('twiml_voice_url_wrong');
+ if(!state.callerIdVerified)state.errors.push('caller_id_not_verified');
+ if(state.trialRecipientVerified===false)state.errors.push('trial_destination_not_verified');
+ if(!approved)state.errors.push('approved_task_missing');
+ if(!enabled)state.errors.push('live_calls_disabled');
+ if(state.attemptsRemaining===0)state.errors.push('daily_attempt_already_used');
+ const ready=state.accountValid&&state.apiKeyValid&&state.twimlUrlCorrect&&state.callerIdVerified&&
+  state.trialRecipientVerified!==false&&approved&&enabled&&state.attemptsRemaining>0;
+ return response(res,200,{ready,...state});
+}
+
 async function handleTaskToken(req,res){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
  if(!taskReady())return response(res,503,{error:'twilio_task_configuration_incomplete',message:'Twilio calling is not configured/enabled'});
@@ -48,15 +125,16 @@ async function handleTaskToken(req,res){
   const phone=getTaskNumber(task);
   if(!task||!permittedNumber(phone))return response(res,403,{error:'no_approved_dial_target'});
   const db=serviceClient();
-  const {data:used,error:usedError}=await db.from('david_task_call_attempts').select('id').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(1);
+  const {data:used,error:usedError}=await db.from('david_task_call_attempts').select('attempt_number').eq('worker_user_id',ctx.user.id).eq('task_date',dialDay()).limit(2);
   if(usedError)return response(res,503,{error:'limit_check_unavailable'});
-  if(used?.length)return response(res,409,{error:'daily_call_already_attempted'});
+  const remaining=Math.max(0,dailyCallLimit(task)-(used||[]).length);
+  if(!remaining)return response(res,409,{error:'daily_call_already_attempted'});
   const {AccessToken}=twilio.jwt;
   const token=new AccessToken(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_API_KEY_SID,process.env.TWILIO_API_KEY_SECRET,{
     identity:'dpp-task-'+ctx.user.id,ttl:600
   });
   token.addGrant(new AccessToken.VoiceGrant({outgoingApplicationSid:process.env.TWILIO_TASK_TWIML_APP_SID,incomingAllow:false}));
-  return response(res,200,{token:token.toJwt(),dialTo:phone,taskId:task.id,remainingCalls:1});
+  return response(res,200,{token:token.toJwt(),dialTo:phone,taskId:task.id,remainingCalls:remaining});
  }catch{return response(res,503,{error:'task_token_unavailable'})}
 }
 async function handleTaskVoice(req,res){
@@ -72,17 +150,68 @@ async function handleTaskVoice(req,res){
   const task=await taskWorker(db,id);
   const phone=getTaskNumber(task);
   if(!task||!permittedNumber(phone))return dialReject(res,'No approved daily calling task.');
+  // Historical attempts remain intact. A unique numbered DB slot prevents concurrent retries.
+  const {data:prior,error:priorError}=await db.from('david_task_call_attempts')
+   .select('attempt_number').eq('worker_user_id',id).eq('task_date',dialDay()).order('attempt_number',{ascending:false}).limit(1);
+  if(priorError)return dialReject(res,'Daily call limit check failed.');
+  const nextAttempt=(prior?.[0]?.attempt_number||0)+1;
+  if(nextAttempt>dailyCallLimit(task))return dialReject(res,'Daily call limit reached.');
   const {error}=await db.from('david_task_call_attempts').insert({
-   worker_user_id:id,task_id:task.id,task_date:dialDay(),target_phone:phone,parent_call_sid:sid,status:'initiated'
+   worker_user_id:id,task_id:task.id,task_date:dialDay(),target_phone:phone,parent_call_sid:sid,
+   status:'initiated',attempt_number:nextAttempt
   });
   if(error)return dialReject(res,'Daily calling limit or verification failed.');
+  // A REAL Twilio parent CallSid creates one durable session. Do not create sample calls.
+  const {data:matches,error:companyError}=await db.from('david_companies')
+   .select('id,company_name,country,sector,contact_name,contact_email,contact_phone,research_notes,task')
+   .eq('assigned_to',id).eq('contact_phone',phone).eq('calling_approved',true).eq('do_not_call',false).limit(2);
+  if(companyError)return dialReject(res,'Company verification unavailable.');
+  const company=matches?.length===1?matches[0]:null;
+  const snapshot=company?{company_name:company.company_name,country:company.country,sector:company.sector,
+    contact_name:company.contact_name,contact_email:company.contact_email,
+    contact_phone:company.contact_phone,research_notes:company.research_notes,task:company.task}:{};
+  const {error:sessionError}=await db.from('david_live_call_sessions').upsert({
+    call_sid:sid,worker_user_id:id,company_id:company?.id||null,company_snapshot:snapshot,
+    state:'initiated',language_code:'bg-BG'
+  },{onConflict:'call_sid',ignoreDuplicates:true});
+  if(sessionError)return dialReject(res,'Call timeline storage unavailable.');
   const twiml=new twilio.twiml.VoiceResponse();
-  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record'});
+  if(process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'){
+   let conferenceXml;
+   try{conferenceXml=await createConferenceDial(db,sid,id,phone)}
+   catch(error){console.warn('DAVID conference start failed',error?.message||'error');return dialReject(res,'Conference is not available.')}
+   res.setHeader('Content-Type','text/xml; charset=utf-8');res.setHeader('Cache-Control','no-store');
+   return res.status(200).send(conferenceXml);
+  }
+  const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record',action:callbackUrl('task-dial-finished'),method:'POST'});
   dial.number(phone);
   res.setHeader('Content-Type','text/xml; charset=utf-8');
   res.setHeader('Cache-Control','no-store');
   return res.status(200).send(twiml.toString());
  }catch{return dialReject(res,'Calling is not currently available.')}
+}
+async function handleTaskDialFinished(req,res){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ if(!signedTwilio(req,'task-dial-finished'))return response(res,403,{error:'twilio_signature_invalid'});
+ const sid=String(req.body?.CallSid||'');
+ if(!callSidPattern.test(sid))return response(res,400,{error:'bad_call_sid'});
+ const raw=String(req.body?.DialCallStatus||'failed');
+ const state=raw==='completed'?'completed':raw==='canceled'?'canceled':'failed';
+ const duration=Number(req.body?.DialCallDuration);
+ const db=serviceClient();
+ const endedAt=new Date();
+ const patch={state,ended_at:endedAt.toISOString(),updated_at:endedAt.toISOString()};
+ const attemptPatch={status:raw,updated_at:new Date().toISOString()};
+ if(Number.isInteger(duration)&&duration>=0&&duration<=7200){attemptPatch.duration_seconds=duration;if(raw==='completed')patch.started_at=new Date(endedAt.getTime()-duration*1000).toISOString();}
+ const [s,a]=await Promise.all([
+  db.from('david_live_call_sessions').update(patch).eq('call_sid',sid),
+  db.from('david_task_call_attempts').update(attemptPatch).eq('parent_call_sid',sid)
+ ]);
+ if(s.error||a.error)return response(res,503,{error:'call_completion_unavailable'});
+ const xml=new twilio.twiml.VoiceResponse();xml.hangup();
+ res.setHeader('Content-Type','text/xml; charset=utf-8');
+ res.setHeader('Cache-Control','no-store');
+ return res.status(200).send(xml.toString());
 }
 async function handleTaskStatus(req,res){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
@@ -187,6 +316,10 @@ async function handleDppTasks(req,res,action){
 
 export default async function handler(req,res){
  const action=req.query?.action;
+ if(action==='task-dial-finished')return handleTaskDialFinished(req,res);
+ if(['task-child-status','task-conference-status'].includes(action))return handleConferenceWebhook(req,res,action);
+ if(['task-control-status','task-hold','task-transfer'].includes(action))return handleConferenceControl(req,res,action);
+ if(['browser-record-prepare','browser-record-complete','browser-record-link','call-records','call-detail','live-status','live-consent','live-stop','live-audio','live-transcript','live-recording-status','call-outcome','company-history','admin-inbox','admin-mark-read'].includes(action))return handleCallIntelligence(req,res,action);
  if(typeof action==='string'&&action.startsWith('tasks-'))return handleDppTasks(req,res,action.slice(6));
  if(action==='tryout-voice'){
   if(!['GET','POST'].includes(req.method))return response(res,405,{error:'method_not_allowed'});
@@ -204,6 +337,7 @@ export default async function handler(req,res){
   res.setHeader('X-DAVID-Voice-Sample',validAudio?'external-male-audio':'twilio-female-fallback');
   return res.status(200).send(twiml.toString());
  }
+ if(action==='task-preflight')return handleTaskPreflight(req,res);
  if(action==='task-token')return handleTaskToken(req,res);
  if(action==='task-voice')return handleTaskVoice(req,res);
  if(action==='task-status')return handleTaskStatus(req,res);
