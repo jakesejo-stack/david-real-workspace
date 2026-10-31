@@ -55,7 +55,8 @@ async function startApprovedCall(status){
   const call=await dev.connect({params:{taskId:task.taskId}});
   callingCall=call;
   const finish=()=>{
-   if(callingCall===call)callingCall=null;
+   stopBrowserRecording();
+    if(callingCall===call)callingCall=null;
    if(callingDevice===dev){try{dev.destroy()}catch{}callingDevice=null;}
    activeCallStatus='Разговорът приключи. Попълни резултата и бележката.';status(activeCallStatus);
   };
@@ -77,6 +78,72 @@ async function startApprovedCall(status){
   throw error;
  }finally{connecting=false;}
 }
+
+let browserRecording=null;
+const browserRecordingActive=()=>!!browserRecording?.recorder&&browserRecording.recorder.state!=='inactive';
+const recorderFormat=()=>['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(x=>MediaRecorder.isTypeSupported(x));
+async function beginBrowserRecording(status,updateControls){
+ if(browserRecordingActive()||browserRecording?.uploading)throw Error('Вече има активен запис или качване');
+ if(!callingCall||callingCall.status()!=='open')throw Error('Няма свързан разговор');
+ if(typeof MediaRecorder==='undefined')throw Error('Браузърът не поддържа MediaRecorder');
+ const local=callingCall.getLocalStream(),remote=callingCall.getRemoteStream();
+ if(!local?.getAudioTracks().length||!remote?.getAudioTracks().length)throw Error('Няма звук и от двете страни. Не започвам непълен запис.');
+ const sid=String(callingCall.parameters?.CallSid||'');
+ if(!/^CA[0-9a-f]{32}$/i.test(sid))throw Error('Twilio още не е върнал Call SID');
+ if(!window.confirm('Кажи на клиента: „Разговорът се записва, искате ли да продължим?“\n\nКлиентът изрично ли даде съгласие да се запишат двата гласа?')){
+  status('Няма съгласие. Записът не е стартиран.');return false;
+ }
+ const mime=recorderFormat();if(!mime)throw Error('Няма поддържан формат за аудиозапис');
+ const mimeType=mime.split(';')[0];
+ status('Проверявам съгласието и защитеното хранилище...');
+ const upload=await api(endp('browser-record-prepare'),'POST',{call_sid:sid,clientConfirmed:true,noticeVersion:'david-v1',method:'verbal',mime_type:mimeType});
+ const Audio=window.AudioContext||window.webkitAudioContext;
+ if(!Audio)throw Error('WebAudio не е достъпен');
+ const ctx=new Audio(),mix=ctx.createMediaStreamDestination();
+ const op=ctx.createMediaStreamSource(local),customer=ctx.createMediaStreamSource(remote);
+ const opGain=ctx.createGain(),customerGain=ctx.createGain();
+ opGain.gain.value=0.9;customerGain.gain.value=0.9;
+ op.connect(opGain).connect(mix);
+ customer.connect(customerGain).connect(mix);
+ let recorder;
+ try{recorder=new MediaRecorder(mix.stream,{mimeType:mime,audioBitsPerSecond:64000})}
+ catch(e){await ctx.close();throw Error('MediaRecorder: '+e.message)}
+ const chunks=[];let bytes=0;
+ const entry={recorder,ctx,mix,upload,uploading:false};
+ browserRecording=entry;
+ recorder.ondataavailable=e=>{
+  if(e.data?.size){chunks.push(e.data);bytes+=e.data.size}
+  if(bytes>26214400&&recorder.state!=='inactive'){status('25 MB лимит. Спирам записа.');recorder.stop()}
+ };
+ recorder.onerror=e=>status('Грешка от браузърния recorder: '+(e.error?.message||'audio_error'));
+ recorder.onstop=async()=>{
+  entry.uploading=true;updateControls();
+  try{await ctx.close()}catch{}
+  for(const track of mix.stream.getTracks())track.stop();
+  if(!chunks.length){status('Няма аудиоданни. Нищо не е запазено.');entry.uploading=false;updateControls();return}
+  const blob=new Blob(chunks,{type:mimeType});
+  if(blob.size>26214400){status('Записът е над лимита 25 MB.');entry.uploading=false;updateControls();return}
+  status('Качвам двата гласа в частното хранилище на DAVID...');
+  try{
+   const {error}=await client.storage.from(upload.bucket).uploadToSignedUrl(upload.path,upload.token,blob,{contentType:mimeType});
+   if(error)throw error;
+   const result=await api(endp('browser-record-complete'),'POST',{recording_id:upload.recording_id});
+   if(!result.saved)throw Error('Сървърът не потвърди запис');
+   status('✓ Записът е запазен в Supabase. Аудиото е достъпно само за администратори.');
+  }catch(e){status('Записът не се съхрани: '+e.message+'. Няма да твърдим, че е качен.')}
+  finally{entry.uploading=false;if(browserRecording===entry)browserRecording=null;updateControls()}
+ };
+ recorder.start(1000);
+ status('🔴 Записвам оператора и клиента локално чрез MediaRecorder, с изрично съгласие.');
+ updateControls();return true;
+}
+function stopBrowserRecording(){
+ const rec=browserRecording?.recorder;
+ if(!rec||rec.state==='inactive')return false;
+ try{rec.stop()}catch{return false}
+ return true;
+}
+
 function endApprovedCall(){
  if(!callingCall)return false;
  callingCall.disconnect();
