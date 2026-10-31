@@ -51,7 +51,7 @@ async function details(a,s){
   a.db.from('david_live_transcript_segments').select('id,speaker,content,language_code,source_at,created_at').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(300),
   a.db.from('david_live_coach_suggestions').select('id,transcript_segment_id,suggestion,created_at,latency_ms').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(150),
   mayHearAudio?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null}),
-  mayHearAudio?a.db.from('david_browser_recordings').select('id,status,byte_size,completed_at,mime_type').eq('call_sid',s.call_sid).eq('status','completed').maybeSingle():Promise.resolve({data:null,error:null})
+  mayHearAudio?a.db.from('david_browser_recordings').select('id,status,byte_size,completed_at,mime_type,record_duration_ms,record_ended_reason').eq('call_sid',s.call_sid).eq('status','completed').maybeSingle():Promise.resolve({data:null,error:null})
  ]);
  if(ue||se||re||be)throw Error('call_detail_unavailable');
  return {session:{call_sid:s.call_sid,state:s.state,started_at:s.started_at,ended_at:s.ended_at,company:safeCompany(s.company_snapshot),language_code:s.language_code,transcription_enabled:!!s.transcription_consent_at,recording_authorized:!!s.recording_consent_at},
@@ -291,8 +291,13 @@ async function browserPrepare(req,res,a){
 }
 async function browserComplete(req,res,a){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
- const id=bodyOf(req).recording_id;
+ const body=bodyOf(req),id=body.recording_id;
  if(!goodUuid(id))return response(res,400,{error:'invalid_recording_id'});
+ const duration=Number(body.duration_ms);
+ const endedReason=String(body.ended_reason||'unknown');
+ if(!Number.isInteger(duration)||duration<1||duration>3600000)return response(res,400,{error:'invalid_recording_duration'});
+ if(!['call_ended','manual_stop','limit','track_ended','unknown'].includes(endedReason))
+  return response(res,400,{error:'invalid_recording_end_reason'});
  const {data:r,error:re}=await a.db.from('david_browser_recordings').select('id,object_path,status').eq('id',id).eq('worker_user_id',a.user.id).maybeSingle();
  if(re||!r)return response(res,404,{error:'recording_not_found'});
  if(r.status==='completed')return response(res,200,{saved:true,recording_id:id});
@@ -300,7 +305,11 @@ async function browserComplete(req,res,a){
  if(ie||!info)return response(res,409,{error:'upload_not_found'});
  const bytes=Number(info.size||info.metadata?.size||0);
  if(!Number.isFinite(bytes)||bytes<1024||bytes>26214400)return response(res,413,{error:'invalid_audio_size'});
- const {error:ue}=await a.db.from('david_browser_recordings').update({status:'completed',byte_size:bytes,completed_at:new Date().toISOString()}).eq('id',id).eq('worker_user_id',a.user.id);
+ const endedAt=new Date().toISOString();
+ const {error:ue}=await a.db.from('david_browser_recordings').update({
+  status:'completed',byte_size:bytes,completed_at:endedAt,
+  record_duration_ms:duration,record_ended_reason:endedReason,record_stopped_at:endedAt
+ }).eq('id',id).eq('worker_user_id',a.user.id);
  return response(res,ue?503:200,ue?{error:'recording_save_failed'}:{saved:true,recording_id:id});
 }
 async function browserLink(req,res,a){
@@ -378,7 +387,7 @@ async function adminInbox(req,res,a){
   a.db.from('david_live_transcript_segments').select('call_sid,id,speaker,content,created_at').in('call_sid',ids).order('id',{ascending:false}).limit(800),
   a.db.from('david_admin_call_inbox_reads').select('call_sid,chat_seen_at,audio_seen_at').eq('admin_user_id',a.user.id).in('call_sid',ids),
   a.db.from('david_members').select('user_id,display_name').in('user_id',workerIds),
-  a.db.from('david_browser_recordings').select('id,call_sid,status,byte_size,created_at,completed_at,consent_at').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
+  a.db.from('david_browser_recordings').select('id,call_sid,status,byte_size,created_at,completed_at,consent_at,record_duration_ms,record_ended_reason').in('call_sid',ids).order('created_at',{ascending:false}).limit(200),
   a.db.from('david_task_call_attempts').select('parent_call_sid,target_phone,status,duration_seconds,created_at').in('parent_call_sid',ids),
   a.db.from('david_live_call_outcomes').select('call_sid,disposition,notes,updated_at').in('call_sid',ids),
   a.db.from('david_ai_profiles').select('user_id,full_name,gmail').in('user_id',workerIds),
@@ -423,6 +432,8 @@ async function adminInbox(req,res,a){
    recording_started_at:saved?.created_at||twilioRecording?.created_at||null,
    recording_completed_at:saved?.completed_at||null,
    recording_bytes:Number(saved?.byte_size)||null,
+   recording_duration_ms:Number(saved?.record_duration_ms)||null,
+   recording_end_reason:saved?.record_ended_reason||null,
    browser_recording_id:browserComplete?saved.id:null,
    provider_recording_sid:providerComplete?twilioRecording.recording_sid:null,
    recording_consent:!!c.recording_consent_at,
