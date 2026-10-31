@@ -267,7 +267,8 @@ function mountLive(root){
  right.append(companyNote);
  grid.append(call,right);shell.append(grid);
  const outcomePanel=el('div','sf-sales-outcome');outcomePanel.hidden=true;
- outcomePanel.append(el('h3','','Резултат от приключилия разговор'));
+ const outcomeTitle=el('h3','','Резултат от приключилия разговор');
+ outcomePanel.append(outcomeTitle);
  const summary=el('p','muted','');
  const options=el('div','sf-sales-options');
  const buttons=new Map();let choice=null,currentSid=null;
@@ -299,10 +300,59 @@ function mountLive(root){
   }catch(error){message.textContent='Не е записано: '+error.message}
   finally{confirm.disabled=false}
  });
- outcomePanel.append(summary,options,notesLabel,confirm,message);
+ const backToDesk=el('button','btn subtle sf-back-to-phone','↩ Обратно към телефона');
+ backToDesk.type='button';
+ outcomePanel.append(summary,options,notesLabel,confirm,message,backToDesk);
  shell.append(outcomePanel);
  title.insertAdjacentElement('afterend',shell);
  let lastActive=false,lastNoteSignature='',busy=false,lastRecent=0,lastOutcomeScrolled=null;
+ let awaitingEnd=false,endedEventAt=0,pendingCallSid=null,lastLiveSid=null,dialAttemptAt=0,dismissedCallSid=null;
+ const jumpToResult=()=>{
+  if(!outcomePanel.isConnected)return;
+  outcomePanel.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+ };
+ const showEndedWaiting=()=>{
+  awaitingEnd=true;endedEventAt=Date.now();
+  grid.hidden=true;outcomePanel.hidden=false;
+  outcomeTitle.textContent='✓ Call ended · Резултат от приключилия разговор';
+  summary.textContent='Разговорът приключи. Зареждам фирмата и данните за бележката...';
+  options.hidden=true;notesLabel.hidden=true;confirm.hidden=true;
+  confirm.disabled=true;
+  message.textContent='Проверявам завършения разговор в системата...';
+  badge.textContent='✓ Call ended';badge.className='tag green';
+  setCallStatus('✓ Call ended · Разговорът приключи.');
+  jumpToResult();
+ };
+ const openEndedResult=c=>{
+  awaitingEnd=false;grid.hidden=true;outcomePanel.hidden=false;
+  outcomeTitle.textContent='✓ Call ended · Резултат от приключилия разговор';
+  options.hidden=false;notesLabel.hidden=false;confirm.hidden=false;confirm.disabled=false;
+  badge.textContent='✓ Call ended';badge.className='tag green';
+  if(c.call_sid!==currentSid){
+   choice=null;notes.value='';message.textContent='';
+   for(const b of buttons.values()){b.classList.remove('selected');b.setAttribute('aria-pressed','false')}
+  }
+  currentSid=c.call_sid;
+  summary.textContent=(c.company?.company_name||'Фирма')+' · '+date(c.ended_at)+' · '+c.state;
+  if(lastOutcomeScrolled!==c.call_sid){
+   lastOutcomeScrolled=c.call_sid;
+   jumpToResult();
+  }
+ };
+ const handleEndEvent=event=>{
+  if(!shell.isConnected)return;
+  pendingCallSid=sidOk(event.detail?.callSid)?event.detail.callSid:lastLiveSid;
+  showEndedWaiting();
+  refresh();
+ };
+ document.addEventListener('david:call-ended',handleEndEvent);
+ backToDesk.addEventListener('click',()=>{
+  if(currentSid&&!confirm.hidden&&notes.value.trim()&&!window.confirm('Бележката не е запазена. Да се върнем ли към телефона?'))return;
+  dismissedCallSid=currentSid||pendingCallSid;
+  awaitingEnd=false;pendingCallSid=null;
+  outcomePanel.hidden=true;grid.hidden=false;
+  badge.textContent='Няма активен разговор';badge.className='tag gray';
+ });
  function renderLines(lines){
   timeline.replaceChildren();
   const recent=(lines||[]).slice(-8);
