@@ -43,6 +43,7 @@ function hideModal(){
  if(!modal)return;
  modal.style.display='none';
  document.body.style.overflow='';
+ for(const audio of modal.querySelectorAll('audio')){audio.pause();audio.removeAttribute('src');audio.load()}
  if(playerBlob){URL.revokeObjectURL(playerBlob);playerBlob=null;}
  if(closeCallback){closeCallback.focus();closeCallback=null;}
 }
@@ -71,24 +72,50 @@ async function openCall(sid,trigger){
   company.append(info);
   if(c.research_notes)company.append(node('p','david-ci-pre',c.research_notes));
   body.append(company);
-  const sound=node('section','david-ci-section');sound.append(sectionTitle('Аудиозапис от Twilio'));
-  const records=(data.recordings||[]).filter(x=>x.status==='completed');
-  if(!s.recording_authorized)sound.append(node('p','muted','Няма разрешено записване за този разговор.'));
-  else if(records.length===0)sound.append(node('p','muted','Няма наличен завършен аудиозапис.'));
-  else{
-   const playButton=node('button','btn primary','▶ Зареди защитения аудиозапис');
-   const holder=node('div','');playButton.addEventListener('click',async()=>{
-    playButton.disabled=true;holder.textContent='Зареждане на аудиото...';
+  const sound=node('section','david-ci-section');
+  sound.append(sectionTitle('🎧 Аудиозапис на разговора'));
+  const browserRecording=data.browser_recording?.status==='completed'?data.browser_recording:null;
+  const twilioRecord=(data.recordings||[]).find(x=>x.status==='completed');
+  if(!s.recording_authorized){
+   sound.append(node('p','muted','Няма съгласие за аудиозапис на този разговор.'));
+  }else if(!browserRecording&&!twilioRecord){
+   sound.append(node('p','muted','Няма потвърден аудиофайл за този разговор. Записът се показва след успешно качване.'));
+  }else{
+   const sourceName=browserRecording?'DAVID браузърен запис (оператор + клиент)':'Twilio запис';
+   const info=node('p','muted',sourceName+(browserRecording?.byte_size?' · '+(browserRecording.byte_size/1048576).toFixed(2)+' MB':''));
+   const playButton=node('button','btn primary','🎧 Отвори и слушай аудиото');
+   playButton.type='button';
+   const holder=node('div','david-ci-audio-holder');
+   playButton.addEventListener('click',async()=>{
+    playButton.disabled=true;
+    holder.textContent='🔒 Зареждам защитеното аудио...';
     try{
-     const token=await getToken();
-     const resp=await fetch('/api/integrations/david/live-audio?'+new URLSearchParams({sid,recording_sid:records[0].recording_sid}),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-     if(!resp.ok){const err=await resp.json().catch(()=>({}));throw Error(err.error||'Аудиото не е достъпно');}
-     const blob=await resp.blob();if(playerBlob)URL.revokeObjectURL(playerBlob);
-     callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_sid:sid,kind:'audio'})}).catch(()=>{});
-     playerBlob=URL.createObjectURL(blob);const audio=node('audio','');audio.controls=true;audio.preload='none';audio.src=playerBlob;audio.style.width='100%';holder.replaceChildren(audio);
-    }catch(error){holder.textContent=error.message}finally{playButton.disabled=false}
+     let resp;
+     if(browserRecording){
+      const link=await callApi('browser-record-link',{recording_id:browserRecording.id});
+      if(!link?.url||!/^https:\/\//.test(link.url))throw Error('Липсва защитен линк за записа.');
+      resp=await fetch(link.url,{cache:'no-store'});
+     }else{
+      const token=await getToken();
+      resp=await fetch('/api/integrations/david/live-audio?'+new URLSearchParams({sid,recording_sid:twilioRecord.recording_sid}),{
+       headers:{Authorization:'Bearer '+token},cache:'no-store'
+      });
+     }
+     if(!resp.ok)throw Error('Не мога да заредя аудиото ('+resp.status+').');
+     const blob=await resp.blob();
+     if(blob.size<1024||blob.size>26214400)throw Error('Невалиден или прекалено голям аудиофайл.');
+     if(playerBlob)URL.revokeObjectURL(playerBlob);
+     playerBlob=URL.createObjectURL(blob);
+     const audio=node('audio','david-ci-player');audio.controls=true;audio.preload='metadata';audio.src=playerBlob;
+     audio.setAttribute('aria-label','Запис на разговора с '+(c.company_name||'клиента'));
+     holder.replaceChildren(audio,node('p','muted','Натисни ▶ Play, Pause или премести времевата лента.'));
+     playButton.textContent='↻ Зареди отново аудиото';
+     callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({call_sid:sid,kind:'audio'})}).catch(()=>{});
+    }catch(error){holder.textContent='Грешка при зареждане: '+error.message}
+    finally{playButton.disabled=false}
    });
-   sound.append(playButton,holder);
+   sound.append(info,playButton,holder);
   }
   if(data.audio_access===true)body.append(sound);
   const transcript=node('section','david-ci-section');transcript.append(sectionTitle('Пълен разговор и DAVID подсказки'));
@@ -242,6 +269,8 @@ css.textContent=`
 .david-ci-line{padding:12px;background:#f0f5ff;border-radius:10px;margin:9px 0}
 .david-ci-line small{color:#516582}.david-ci-line p{margin:6px 0 0;white-space:pre-wrap}
 .david-ci-client{background:#fff5e8}
+.david-ci-audio-holder{margin-top:12px}
+.david-ci-player{width:100%;display:block;margin:12px 0}
 @media(max-width:690px){.david-ci-modal{padding:0}.david-ci-dialog{width:100%;height:100dvh;max-height:none;border-radius:0}.david-ci-dialog-header{padding:12px}.david-ci-dialog-body{padding:12px 12px 90px}.david-ci-grid{grid-template-columns:1fr}.david-ci-record button{width:100%}}
 `;
 document.head.append(css);
