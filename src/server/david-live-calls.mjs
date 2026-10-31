@@ -293,9 +293,10 @@ async function browserComplete(req,res,a){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
  const body=bodyOf(req),id=body.recording_id;
  if(!goodUuid(id))return response(res,400,{error:'invalid_recording_id'});
- const duration=Number(body.duration_ms);
+ const duration=body.duration_ms===undefined?null:Number(body.duration_ms);
  const endedReason=String(body.ended_reason||'unknown');
- if(!Number.isInteger(duration)||duration<1||duration>3600000)return response(res,400,{error:'invalid_recording_duration'});
+ if(duration!==null&&(!Number.isInteger(duration)||duration<1||duration>3600000))
+  return response(res,400,{error:'invalid_recording_duration'});
  if(!['call_ended','manual_stop','limit','track_ended','unknown'].includes(endedReason))
   return response(res,400,{error:'invalid_recording_end_reason'});
  const {data:r,error:re}=await a.db.from('david_browser_recordings').select('id,object_path,status').eq('id',id).eq('worker_user_id',a.user.id).maybeSingle();
