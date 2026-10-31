@@ -3,6 +3,7 @@ import {authorizedBridge,serviceClient,jsonBody,validCode,validExternalId,codeDi
 
 import twilio from 'twilio';
 import {handleCallIntelligence} from '../../../src/server/david-live-calls.mjs';
+import {createConferenceDial,handleConferenceControl,handleConferenceWebhook} from '../../../src/server/david-conference-controls.mjs';
 import {approvedGoogleUser} from '../../_david_link_shared.js';
 
 const taskConfigKeys=['SUPABASE_SERVICE_ROLE_KEY','TWILIO_ACCOUNT_SID','TWILIO_API_KEY_SID','TWILIO_API_KEY_SECRET','TWILIO_AUTH_TOKEN','TWILIO_TASK_TWIML_APP_SID','TWILIO_FROM_NUMBER','PUBLIC_ORIGIN','DPP_TASK_ALLOWED_NUMBERS'];
@@ -165,6 +166,13 @@ async function handleTaskVoice(req,res){
   },{onConflict:'call_sid',ignoreDuplicates:true});
   if(sessionError)return dialReject(res,'Call timeline storage unavailable.');
   const twiml=new twilio.twiml.VoiceResponse();
+  if(process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'){
+   let conferenceXml;
+   try{conferenceXml=await createConferenceDial(db,sid,id,phone)}
+   catch(error){console.warn('DAVID conference start failed',error?.message||'error');return dialReject(res,'Conference is not available.')}
+   res.setHeader('Content-Type','text/xml; charset=utf-8');res.setHeader('Cache-Control','no-store');
+   return res.status(200).send(conferenceXml);
+  }
   const dial=twiml.dial({callerId:process.env.TWILIO_FROM_NUMBER,timeout:20,timeLimit:300,answerOnBridge:true,record:'do-not-record',action:callbackUrl('task-dial-finished'),method:'POST'});
   dial.number(phone);
   res.setHeader('Content-Type','text/xml; charset=utf-8');
@@ -299,7 +307,9 @@ async function handleDppTasks(req,res,action){
 export default async function handler(req,res){
  const action=req.query?.action;
  if(action==='task-dial-finished')return handleTaskDialFinished(req,res);
- if(['call-records','call-detail','live-status','live-consent','live-stop','live-audio','live-transcript','live-recording-status','call-outcome','company-history','admin-inbox','admin-mark-read'].includes(action))return handleCallIntelligence(req,res,action);
+ if(['task-child-status','task-conference-status'].includes(action))return handleConferenceWebhook(req,res,action);
+ if(['task-control-status','task-hold','task-transfer'].includes(action))return handleConferenceControl(req,res,action);
+ if(['browser-record-prepare','browser-record-complete','browser-record-link','call-records','call-detail','live-status','live-consent','live-stop','live-audio','live-transcript','live-recording-status','call-outcome','company-history','admin-inbox','admin-mark-read'].includes(action))return handleCallIntelligence(req,res,action);
  if(typeof action==='string'&&action.startsWith('tasks-'))return handleDppTasks(req,res,action.slice(6));
  if(action==='tryout-voice'){
   if(!['GET','POST'].includes(req.method))return response(res,405,{error:'method_not_allowed'});
