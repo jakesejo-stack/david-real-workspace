@@ -452,8 +452,11 @@ css.textContent=`
 .sf-sales-timeline{max-height:280px;overflow-y:auto;margin:13px 0}
 .sf-sales-line{background:white;border-radius:10px;padding:10px;margin:6px 0;line-height:1.5}
 .sf-sales-line.client{background:#fff5e6}
-.sf-sales-phone-actions{display:flex;justify-content:center;gap:12px;margin:16px auto}
-.sf-sales-phone-actions button{flex:1 1 0;max-width:210px;min-height:48px;font-size:16px}
+.sf-sales-phone-actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:16px auto}
+.sf-sales-phone-actions button{min-width:0;max-width:none;min-height:48px;font-size:14px;white-space:normal;padding:8px 5px}
+.sf-record-btn{background:#ffebed!important;color:#9d1f2a!important;border:1px solid #efb8bb!important}
+.sf-hold-btn{background:#fff1ce!important;color:#805505!important;border:1px solid #e8cb8b!important}
+.sf-transfer-btn{background:#e6eaff!important;color:#343c9a!important;border:1px solid #bec5ee!important}
 .sf-sales-call-status{font-size:13px;color:#476383;margin:6px 0 0;overflow-wrap:anywhere}
 .main:has(#sf-sales-meeting)>.dock{display:none!important}
 .sf-sales-right{background:white;border:1px solid #dbe7f5;padding:14px;border-radius:14px;overflow:auto;max-height:560px}
@@ -470,7 +473,7 @@ css.textContent=`
 .sf-sales-items{display:grid;gap:12px;margin-top:14px}
 .sf-sales-item{padding:15px;border:1px solid #d8e4f2;border-radius:13px;background:#fff}
 .sf-sales-item h3{margin:0}.sf-sales-feedback{margin-top:12px;padding:12px;border-radius:10px;background:#e5f5ff;white-space:pre-wrap;line-height:1.6}
-@media(max-width:780px){.sf-sales-grid{grid-template-columns:1fr}.sf-sales-phone{padding:12px}.sf-sales-phone-actions button{max-width:none}.sf-sales-right{max-height:240px}.sf-sales-options .btn{flex:1 1 100%}}
+@media(max-width:780px){.sf-sales-grid{grid-template-columns:1fr}.sf-sales-phone{padding:12px}.sf-sales-phone-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-sales-phone-actions button{max-width:none}.sf-sales-right{max-height:240px}.sf-sales-options .btn{flex:1 1 100%}}
 `;
 document.head.append(css);
 const root=document.getElementById('root');if(root){mountLive(root);mountCompanies(root);mountAdmin(root)}
