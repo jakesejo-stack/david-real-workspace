@@ -1,6 +1,6 @@
 // DAVID secure call intelligence API. Imported by the EXISTING catch-all API function.
 // Never starts a paid call or processes media without verified authorization and consent.
-import {createDecipheriv,createHash} from 'node:crypto';
+import {createDecipheriv,createHash,randomUUID} from 'node:crypto';
 import twilio from 'twilio';
 import {approvedGoogleUser,serviceClient,response} from '../../api/_david_link_shared.js';
 
@@ -253,6 +253,64 @@ async function audio(req,res,a){
  return res.status(200).send(bytes);
 }
 
+
+const browserBucket='david-call-audio';
+const browserMimes=new Set(['audio/webm','audio/ogg','audio/mp4']);
+const goodUuid=v=>/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(String(v||''));
+async function browserPrepare(req,res,a){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ const b=bodyOf(req),sid=String(b.call_sid||''),mime=String(b.mime_type||'');
+ if(!sidOK(sid)||b.clientConfirmed!==true||b.noticeVersion!=='david-v1'||b.method!=='verbal')
+  return response(res,400,{error:'explicit_verbal_permission_required'});
+ if(!browserMimes.has(mime))return response(res,400,{error:'unsupported_audio_format'});
+ const s=await ownedSession(a,sid);
+ if(!s||s.worker_user_id!==a.user.id)return response(res,403,{error:'only_operator_can_record'});
+ if(s.ended_at||['completed','failed','canceled'].includes(s.state))return response(res,409,{error:'call_already_ended'});
+ const {data:attempt,error:ae}=await a.db.from('david_task_call_attempts').select('id').eq('parent_call_sid',sid).eq('worker_user_id',a.user.id).maybeSingle();
+ if(ae||!attempt)return response(res,403,{error:'approved_call_required'});
+ const {data:prior,error:pe}=await a.db.from('david_browser_recordings').select('id').eq('call_sid',sid).maybeSingle();
+ if(pe)return response(res,503,{error:'recording_state_unavailable'});
+ if(prior)return response(res,409,{error:'recording_already_prepared'});
+ if(!process.env.TWILIO_ACCOUNT_SID||!process.env.TWILIO_AUTH_TOKEN)return response(res,503,{error:'twilio_not_configured'});
+ let live;try{live=await twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN).calls(sid).fetch()}
+ catch{return response(res,502,{error:'call_verification_failed'})}
+ if(live.status!=='in-progress')return response(res,409,{error:'call_not_connected'});
+ const id=randomUUID(),path=a.user.id+'/'+sid+'/'+id+'.'+(mime==='audio/mp4'?'m4a':mime==='audio/ogg'?'ogg':'webm');
+ const {data:upload,error:ue}=await a.db.storage.from(browserBucket).createSignedUploadUrl(path,{upsert:false});
+ if(ue||!upload?.token)return response(res,503,{error:'private_upload_unavailable'});
+ const now=new Date().toISOString();
+ const {error:ie}=await a.db.from('david_browser_recordings').insert({id,call_sid:sid,worker_user_id:a.user.id,object_path:path,mime_type:mime,status:'pending',consent_at:now});
+ if(ie)return response(res,409,{error:'recording_reservation_failed'});
+ const {error:se}=await a.db.from('david_live_call_sessions').update({recording_consent_at:now,notice_version:'david-v1',consent_method:'operator_attested_verbal_browser_recording',updated_at:now}).eq('call_sid',sid).eq('worker_user_id',a.user.id);
+ if(se)return response(res,503,{error:'consent_audit_failed'});
+ noStore(res);return response(res,200,{recording_id:id,path,token:upload.token,bucket:browserBucket,max_bytes:26214400});
+}
+async function browserComplete(req,res,a){
+ if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
+ const id=bodyOf(req).recording_id;
+ if(!goodUuid(id))return response(res,400,{error:'invalid_recording_id'});
+ const {data:r,error:re}=await a.db.from('david_browser_recordings').select('id,object_path,status').eq('id',id).eq('worker_user_id',a.user.id).maybeSingle();
+ if(re||!r)return response(res,404,{error:'recording_not_found'});
+ if(r.status==='completed')return response(res,200,{saved:true,recording_id:id});
+ const {data:info,error:ie}=await a.db.storage.from(browserBucket).info(r.object_path);
+ if(ie||!info)return response(res,409,{error:'upload_not_found'});
+ const bytes=Number(info.size||info.metadata?.size||0);
+ if(!Number.isFinite(bytes)||bytes<1024||bytes>26214400)return response(res,413,{error:'invalid_audio_size'});
+ const {error:ue}=await a.db.from('david_browser_recordings').update({status:'completed',byte_size:bytes,completed_at:new Date().toISOString()}).eq('id',id).eq('worker_user_id',a.user.id);
+ return response(res,ue?503:200,ue?{error:'recording_save_failed'}:{saved:true,recording_id:id});
+}
+async function browserLink(req,res,a){
+ if(req.method!=='GET')return response(res,405,{error:'method_not_allowed'});
+ if(!canAccessCallAudio(a.role))return response(res,403,{error:'admin_audio_only'});
+ const id=req.query?.recording_id;
+ if(!goodUuid(id))return response(res,400,{error:'invalid_recording_id'});
+ const {data:r,error:re}=await a.db.from('david_browser_recordings').select('id,call_sid,object_path,status').eq('id',id).eq('status','completed').maybeSingle();
+ if(re||!r||!await ownedSession(a,r.call_sid))return response(res,404,{error:'recording_not_available'});
+ const {data:link,error:le}=await a.db.storage.from(browserBucket).createSignedUrl(r.object_path,60);
+ if(le||!link?.signedUrl)return response(res,503,{error:'audio_link_unavailable'});
+ noStore(res);return response(res,200,{url:link.signedUrl,expires_in:60,recording_id:id});
+}
+
 const outcomeKinds=new Set(['no_answer','neutral','early_access']);
 async function saveOutcome(req,res,a){
  if(req.method!=='POST')return response(res,405,{error:'method_not_allowed'});
@@ -300,19 +358,21 @@ async function adminInbox(req,res,a){
  if(ce)return response(res,503,{error:'inbox_unavailable'});
  const ids=(calls||[]).map(x=>x.call_sid);
  if(!ids.length)return response(res,200,{calls:[],unread_audio:0,unread_chat:0});
- const [{data:records,error:re},{data:segments,error:se},{data:reads,error:ae},{data:members,error:me}]=await Promise.all([
+ const [{data:records,error:re},{data:segments,error:se},{data:reads,error:ae},{data:members,error:me},{data:browserRecords,error:be}]=await Promise.all([
   a.db.from('david_recordings').select('call_sid,recording_sid,status').in('call_sid',ids).eq('status','completed'),
   a.db.from('david_live_transcript_segments').select('call_sid,id').in('call_sid',ids).order('id',{ascending:false}).limit(600),
   a.db.from('david_admin_call_inbox_reads').select('call_sid,chat_seen_at,audio_seen_at').eq('admin_user_id',a.user.id).in('call_sid',ids),
-  a.db.from('david_members').select('user_id,display_name').in('user_id',[...new Set((calls||[]).map(x=>x.worker_user_id))])
+  a.db.from('david_members').select('user_id,display_name').in('user_id',[...new Set((calls||[]).map(x=>x.worker_user_id))]),
+  a.db.from('david_browser_recordings').select('id,call_sid').in('call_sid',ids).eq('status','completed')
  ]);
- if(re||se||ae||me)return response(res,503,{error:'inbox_meta_unavailable'});
- const hasAudio=new Set((records||[]).map(x=>x.call_sid)),hasChat=new Set((segments||[]).map(x=>x.call_sid));
+ if(re||se||ae||me||be)return response(res,503,{error:'inbox_meta_unavailable'});
+ const browserAudio=new Map((browserRecords||[]).map(x=>[x.call_sid,x.id]));
+ const hasAudio=new Set([...(records||[]).map(x=>x.call_sid),...browserAudio.keys()]),hasChat=new Set((segments||[]).map(x=>x.call_sid));
  const read=new Map((reads||[]).map(x=>[x.call_sid,x])),names=new Map((members||[]).map(x=>[x.user_id,x.display_name]));
  const result=(calls||[]).map(x=>({
   call_sid:x.call_sid,worker_user_id:x.worker_user_id,worker_name:names.get(x.worker_user_id)||'Оператор',
   company:safeCompany(x.company_snapshot),started_at:x.started_at,ended_at:x.ended_at,state:x.state,
-  has_audio:hasAudio.has(x.call_sid),has_chat:hasChat.has(x.call_sid),
+  has_audio:hasAudio.has(x.call_sid),browser_recording_id:browserAudio.get(x.call_sid)||null,has_chat:hasChat.has(x.call_sid),
   new_audio:hasAudio.has(x.call_sid)&&!read.get(x.call_sid)?.audio_seen_at,
   new_chat:hasChat.has(x.call_sid)&&!read.get(x.call_sid)?.chat_seen_at
  }));
@@ -335,11 +395,14 @@ async function adminMarkRead(req,res,a){
 export async function handleCallIntelligence(req,res,action){
  if(action==='live-transcript')return webhookTranscript(req,res);
  if(action==='live-recording-status')return recordingWebhook(req,res);
- const supported=['call-records','call-detail','live-status','live-consent','live-stop','live-audio','call-outcome','company-history','admin-inbox','admin-mark-read'];
+ const supported=['browser-record-prepare','browser-record-complete','browser-record-link','call-records','call-detail','live-status','live-consent','live-stop','live-audio','call-outcome','company-history','admin-inbox','admin-mark-read'];
  if(!supported.includes(action))return null;
  try{
   const a=await authorized(req);
   if(!a)return response(res,403,{error:'approved_active_google_member_required'});
+  if(action==='browser-record-prepare')return browserPrepare(req,res,a);
+  if(action==='browser-record-complete')return browserComplete(req,res,a);
+  if(action==='browser-record-link')return browserLink(req,res,a);
   if(action==='live-consent')return handleConsent(req,res,a);
   if(action==='live-stop')return handleStop(req,res,a);
   if(action==='live-audio')return audio(req,res,a);
