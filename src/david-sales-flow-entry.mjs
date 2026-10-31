@@ -184,8 +184,19 @@ function mountLive(root){
  const david=el('div','sf-sales-david','DAVID: Ще предложа точните думи след разрешена клиентска реплика.');
  const timeline=el('div','sf-sales-timeline');timeline.setAttribute('aria-live','polite');
  const phoneActions=el('div','sf-sales-phone-actions');
- const dial=el('button','btn green','☎ Набери'),hangup=el('button','btn red','■ Затвори');
- dial.type=hangup.type='button';dial.disabled=false;hangup.disabled=true;
+ const dial=el('button','btn green','☎ Набери'),record=el('button','btn sf-record-btn','⏺ Запис'),hold=el('button','btn sf-hold-btn','⏸ Задържане'),transfer=el('button','btn sf-transfer-btn','⇄ Прехвърляне'),hangup=el('button','btn red','■ Затвори');
+ for(const btn of [dial,record,hold,transfer,hangup])btn.type='button';
+ dial.disabled=false;record.disabled=hold.disabled=transfer.disabled=hangup.disabled=true;
+ let conferenceEnabled=false,callOnHold=false;
+ const syncControls=()=>{
+  dial.disabled=connecting||!!callingCall;
+  hangup.disabled=!callingCall;
+  record.disabled=!callingCall||!!browserRecording?.uploading||!!browserRecording?.recorder&&browserRecording.recorder.state==='inactive';
+  record.textContent=browserRecordingActive()?'⏹ Спри запис':'⏺ Запис';
+  hold.disabled=!callingCall||!conferenceEnabled;
+  transfer.disabled=!callingCall||!conferenceEnabled;
+  hold.textContent=callOnHold?'▶ Върни':'⏸ Задържане';
+ };
  const telephoneStatus=el('p','sf-sales-call-status','Само разрешени задачи и номера от DAVID. Нужни са Twilio credentials и разрешен микрофон.');
  const preflightButton=el('button','btn subtle','Провери Twilio');
  preflightButton.type='button';
@@ -198,14 +209,42 @@ function mountLive(root){
   }catch(error){telephoneStatus.textContent='Проверка неуспешна: '+error.message}
   finally{preflightButton.disabled=false}
  });
- const setCallStatus=msg=>{telephoneStatus.textContent=msg;};
+ const setCallStatus=msg=>{telephoneStatus.textContent=msg;syncControls();};
  dial.addEventListener('click',async()=>{
   dial.disabled=true;
   try{await startApprovedCall(setCallStatus);}catch(error){setCallStatus(String(error?.message||error));}
-  finally{dial.disabled=connecting||!!callingCall;hangup.disabled=!callingCall;}
+  finally{syncControls();}
  });
  hangup.addEventListener('click',()=>{if(endApprovedCall())setCallStatus('Прекратяване на обаждането...')});
- phoneActions.append(dial,hangup);
+ record.addEventListener('click',async()=>{
+  record.disabled=true;
+  try{if(browserRecordingActive()){stopBrowserRecording();setCallStatus('Спирам и качвам записа...')}
+   else await beginBrowserRecording(setCallStatus,syncControls)}
+  catch(error){setCallStatus('Записът не започна: '+error.message)}
+  finally{syncControls()}
+ });
+ hold.addEventListener('click',async()=>{
+  if(!callingCall)return;hold.disabled=true;
+  try{const result=await api(endp('task-hold'),'POST',{call_sid:callingCall.parameters?.CallSid,hold:!callOnHold});
+   callOnHold=result.hold===true;
+   const rec=browserRecording?.recorder;
+   if(rec?.state==='recording'&&callOnHold)rec.pause();
+   if(rec?.state==='paused'&&!callOnHold)rec.resume();
+   setCallStatus(callOnHold?'⏸ Клиентът е задържан. Записът е паузиран.':'▶ Разговорът продължава.')}
+  catch(error){setCallStatus('Задържането не е изпълнено: '+error.message)}
+  finally{syncControls()}
+ });
+ transfer.addEventListener('click',async()=>{
+  if(!callingCall)return;
+  const number=window.prompt('Номер за прехвърляне, предварително разрешен от администратор (+359...)','');
+  if(!number||!window.confirm('Прехвърли към '+number+'? Twilio начислява отделна такса.'))return;
+  transfer.disabled=true;
+  try{const result=await api(endp('task-transfer'),'POST',{call_sid:callingCall.parameters?.CallSid,destination:number});
+   setCallStatus(result.success?'Новият номер звъни. Прехвърляне след успешно свързване.':'Прехвърлянето не успя.')}
+  catch(error){setCallStatus('Прехвърлянето не е изпълнено: '+error.message)}
+  finally{syncControls()}
+ });
+ phoneActions.append(dial,record,hold,transfer,hangup);
  call.append(companyName,client,operator,david,timeline,phoneActions,preflightButton,telephoneStatus);
  const right=el('aside','sf-sales-right');
  right.append(el('h3','','Последни бележки за бизнеса'));
@@ -248,7 +287,7 @@ function mountLive(root){
  outcomePanel.append(summary,options,notesLabel,confirm,message);
  shell.append(outcomePanel);
  title.insertAdjacentElement('afterend',shell);
- let lastActive=false,lastNoteSignature='',busy=false,lastRecent=0;
+ let lastActive=false,lastNoteSignature='',busy=false,lastRecent=0,lastOutcomeScrolled=null;
  function renderLines(lines){
   timeline.replaceChildren();
   const recent=(lines||[]).slice(-8);
@@ -263,8 +302,9 @@ function mountLive(root){
   if(!shell.isConnected||busy)return;busy=true;
   try{
    const x=await api(endp('live-status'));
-   dial.disabled=connecting||!!callingCall;
-   hangup.disabled=!callingCall;
+   conferenceEnabled=!!x.conference_controls_enabled;
+   callOnHold=!!x.on_hold;
+   syncControls();
    if(activeCallStatus)telephoneStatus.textContent=activeCallStatus;
    badge.textContent=x.active?(x.state==='in-progress'?'● В разговор':'◉ Набиране'):'Няма активен разговор';
    badge.className='tag '+(x.active?'green':'gray');
@@ -296,7 +336,7 @@ function mountLive(root){
      if(latest&&latest.call_sid!==currentSid){choice=null;notes.value='';message.textContent='';for(const b of buttons.values()){b.classList.remove('selected');b.setAttribute('aria-pressed','false')}}
      currentSid=latest?.call_sid||null;
      outcomePanel.hidden=!latest;
-     if(latest)summary.textContent=(latest.company?.company_name||'Фирма')+' · '+date(latest.ended_at)+' · '+latest.state;
+     if(latest){summary.textContent=(latest.company?.company_name||'Фирма')+' · '+date(latest.ended_at)+' · '+latest.state;if(lastOutcomeScrolled!==latest.call_sid){lastOutcomeScrolled=latest.call_sid;outcomePanel.scrollIntoView({behavior:'smooth',block:'start'});}}
     }
    }
   }catch(error){badge.textContent='Live: '+error.message;badge.className='tag orange'}
