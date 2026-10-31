@@ -405,6 +405,89 @@ const elapsed=seconds=>{
  const total=Math.floor(seconds);
  return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
 };
+
+function createAdminAudioPanel(call){
+ const panel=el('details','sf-admin-audio-panel');
+ const summary=el('summary','sf-admin-audio-toggle');
+ const heading=el('div','sf-admin-audio-heading');
+ heading.append(
+  el('strong','',call.has_audio?'🎧 Аудиозапис · Отвори и слушай':'🎧 Аудиозапис · Няма файл'),
+  el('small','',call.has_audio?'Натисни тук за ▶ Play / Pause и времева лента':'Аудиото се появява след успешен запис и качване')
+ );
+ summary.append(heading,el('span','sf-admin-audio-chevron','⌄'));
+ panel.append(summary);
+ const content=el('div','sf-admin-audio-content');
+ const info=el('p','sf-admin-audio-message',call.has_audio?
+  'Отвори секцията, за да заредиш записа с временен администраторски достъп.':
+  call.recording_status==='pending'?'Файлът още се обработва. Натисни „Обнови“ в Admin Panel.':
+   'Няма потвърден двустранен запис за този разговор.');
+ content.append(info);
+ panel.append(content);
+ if(!call.has_audio)return panel;
+ const player=el('audio','sf-admin-private-audio');
+ player.controls=true;
+ player.preload='metadata';
+ player.hidden=true;
+ player.setAttribute('aria-label','Аудиозапис от '+(call.worker_name||'оператор')+' до '+(call.company?.company_name||'клиент'));
+ // The direct object URL is not public; the short-lived signed link is issued only for admins.
+ const reload=el('button','btn subtle sf-admin-audio-refresh','↻ Обнови аудиото');
+ reload.type='button';
+ let loading=false,objectUrl=null;
+ const dispose=()=>{
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
+  player.hidden=true;
+ };
+ async function load(){
+  if(loading||!panel.open||!panel.isConnected)return;
+  loading=true;reload.disabled=true;
+  info.textContent='🔒 Проверявам администраторския достъп и зареждам аудиото...';
+  try{
+   let source;
+   if(call.browser_recording_id){
+    const data=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(call.browser_recording_id));
+    if(!data?.url||!/^https:\/\//.test(data.url))throw Error('Липсва валиден защитен аудиолинк');
+    source=data.url;
+   }else if(call.provider_recording_sid){
+    const token=await jwt();
+    const url=endp('live-audio')+'?sid='+encodeURIComponent(call.call_sid)+'&recording_sid='+encodeURIComponent(call.provider_recording_sid);
+    const response=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    if(!response.ok)throw Error('Няма достъп до записания разговор');
+    objectUrl=URL.createObjectURL(await response.blob());
+    source=objectUrl;
+   }else throw Error('Няма съхранен аудиофайл');
+   if(!panel.open||!panel.isConnected){
+    if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
+    return;
+   }
+   // Refresh a signed link on every opening so an expired URL cannot break playback.
+   player.pause();
+   player.src=source;
+   player.hidden=false;
+   player.load();
+   info.textContent='Натисни ▶ Play, за да чуеш разговора. Можеш да поставяш на пауза и да превърташ.';
+   try{await api(endp('admin-mark-read'),'POST',{call_sid:call.call_sid,kind:'audio'})}catch{}
+  }catch(error){
+   dispose();
+   info.textContent='Неуспешно зареждане на аудиото: '+error.message+'. Опитай „Обнови аудиото“.';
+  }finally{
+   loading=false;reload.disabled=false;
+  }
+ }
+ panel.addEventListener('toggle',()=>{
+  if(panel.open)load();
+  else{if(!loading)dispose();info.textContent='Отвори секцията за прослушване на записа.'}
+ });
+ player.addEventListener('error',()=>{
+  if(panel.open&&!player.hidden)info.textContent='Проблем с възпроизвеждането. Натисни „Обнови аудиото“ за нов временен линк.';
+ });
+ reload.addEventListener('click',load);
+ content.append(player,reload);
+ return panel;
+}
+
 function mountAdmin(root){
  const title=[...root.querySelectorAll('.main h1,.main h2')].find(h=>h.textContent?.trim()==='Admin Panel');
  if(!title)return;
@@ -477,7 +560,7 @@ function mountAdmin(root){
    }else if(c.recording_consent){
     recording.append(el('small','muted',' · Има регистрирано съгласие, но няма потвърден файл.'));
    }
-   card.append(recording);
+   card.append(recording,createAdminAudioPanel(c));
    if(c.transcript_preview?.length){
     const transcript=el('div','sf-admin-transcript-preview');
     transcript.append(el('strong','','Последни реплики (транскрипция)'));
@@ -488,9 +571,6 @@ function mountAdmin(root){
     card.append(transcript);
    }else card.append(el('p','muted','Няма налична транскрипция за този разговор.'));
    const row=el('div','sf-sales-row sf-admin-call-buttons');
-   const audio=el('button','btn primary',c.new_audio?'● Нов аудиозапис':'🎧 Прослушай записа');
-   audio.type='button';audio.disabled=!c.has_audio;
-   if(!c.has_audio)audio.textContent=c.recording_status==='pending'?'⌛ Очаква качване':'🎧 Няма аудио';
    const chat=el('button','btn subtle',c.new_chat?'● Нов чат':'💬 Пълен разговор');
    chat.type='button';chat.disabled=!c.has_chat;
    if(!c.has_chat)chat.textContent='💬 Няма транскрипция';
@@ -498,33 +578,8 @@ function mountAdmin(root){
     openTranscript(c.call_sid,chat);
     try{await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'chat'})}catch{}
    });
-   audio.addEventListener('click',async()=>{
-    audio.disabled=true;audio.textContent='🔒 Отварям частния запис...';
-    try{
-     let source,objectUrl=null;
-     if(c.browser_recording_id){
-      const result=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(c.browser_recording_id));
-      source=result.url;
-     }else if(c.provider_recording_sid){
-      const auth=await jwt();
-      const url=endp('live-audio')+'?sid='+encodeURIComponent(c.call_sid)+'&recording_sid='+encodeURIComponent(c.provider_recording_sid);
-      const response=await fetch(url,{headers:{Authorization:'Bearer '+auth},cache:'no-store'});
-      if(!response.ok)throw Error('Няма администраторски достъп до аудиото');
-      objectUrl=URL.createObjectURL(await response.blob());source=objectUrl;
-     }else throw Error('Няма потвърден аудиофайл');
-     const old=card.querySelector('audio.sf-admin-private-audio');
-     if(old){old.pause();if(old.dataset.objectUrl)URL.revokeObjectURL(old.dataset.objectUrl);old.remove()}
-     const player=el('audio','sf-admin-private-audio');
-     player.controls=true;player.preload='metadata';player.src=source;
-     if(objectUrl)player.dataset.objectUrl=objectUrl;
-     player.setAttribute('aria-label','Запис на '+(c.worker_name||'оператор')+' към '+(c.company?.company_name||'клиент'));
-     player.addEventListener('error',()=>{audio.textContent='Грешка при възпроизвеждането. Отвори записа отново.'},{once:true});
-     card.append(player);audio.textContent='🎧 Обнови аудиото';
-     await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'audio'});
-    }catch(error){audio.textContent='Записът не се отвори: '+error.message}
-    finally{audio.disabled=false}
-   });
-   row.append(audio,chat);card.append(row);
+   row.append(chat);
+   card.append(row);
    list.append(card);
   }
  }
@@ -609,6 +664,21 @@ css.textContent=`
 .sf-admin-recording-status{margin:14px 0;padding:9px 12px;border-radius:12px;background:#eef8f6;color:#0e574a;overflow-wrap:anywhere}
 .sf-admin-call-buttons{justify-content:flex-start!important}
 .sf-admin-call-buttons button{flex:0 1 auto}
+.sf-admin-audio-panel{margin:12px 0 14px;border:1px solid #b7d2e8;border-radius:14px;background:#f9fcff;overflow:hidden}
+.sf-admin-audio-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;list-style:none;padding:13px 16px;color:#193d5c}
+.sf-admin-audio-toggle::-webkit-details-marker{display:none}
+.sf-admin-audio-toggle:hover{background:#e9f5ff}
+.sf-admin-audio-toggle:focus-visible{outline:3px solid #246ffd;outline-offset:-3px}
+.sf-admin-audio-heading{display:flex;flex-direction:column;gap:4px}
+.sf-admin-audio-heading small{font-size:12px;color:#536b85}
+.sf-admin-audio-chevron{font-size:23px;transition:transform .15s}
+.sf-admin-audio-panel[open] .sf-admin-audio-chevron{transform:rotate(180deg)}
+.sf-admin-audio-content{padding:10px 16px 17px;border-top:1px solid #dbe8f4}
+.sf-admin-audio-content audio{width:100%;display:block;min-height:54px}
+.sf-admin-audio-content audio[hidden]{display:none}
+.sf-admin-audio-message{font-size:13px;color:#385570;line-height:1.5}
+.sf-admin-audio-refresh{margin-top:9px;font-size:13px}
+
 
 .sf-sales-item{padding:15px;border:1px solid #d8e4f2;border-radius:13px;background:#fff}
 .sf-sales-item h3{margin:0}.sf-sales-feedback{margin-top:12px;padding:12px;border-radius:10px;background:#e5f5ff;white-space:pre-wrap;line-height:1.6}
