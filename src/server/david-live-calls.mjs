@@ -46,15 +46,19 @@ function safeCompany(c){
  return out;
 }
 async function details(a,s){
- const [{data:utterances,error:ue},{data:suggestions,error:se},{data:recordings,error:re}]=await Promise.all([
+ const mayHearAudio=canAccessCallAudio(a.role)&&!!s.recording_consent_at;
+ const [{data:utterances,error:ue},{data:suggestions,error:se},{data:recordings,error:re},{data:browserRecording,error:be}]=await Promise.all([
   a.db.from('david_live_transcript_segments').select('id,speaker,content,language_code,source_at,created_at').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(300),
   a.db.from('david_live_coach_suggestions').select('id,transcript_segment_id,suggestion,created_at,latency_ms').eq('call_sid',s.call_sid).order('id',{ascending:false}).limit(150),
-  canAccessCallAudio(a.role)?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null})
+  mayHearAudio?a.db.from('david_recordings').select('recording_sid,status,created_at').eq('call_sid',s.call_sid).order('created_at',{ascending:false}).limit(10):Promise.resolve({data:[],error:null}),
+  mayHearAudio?a.db.from('david_browser_recordings').select('id,status,byte_size,completed_at,mime_type').eq('call_sid',s.call_sid).eq('status','completed').maybeSingle():Promise.resolve({data:null,error:null})
  ]);
- if(ue||se||re)throw Error('call_detail_unavailable');
+ if(ue||se||re||be)throw Error('call_detail_unavailable');
  return {session:{call_sid:s.call_sid,state:s.state,started_at:s.started_at,ended_at:s.ended_at,company:safeCompany(s.company_snapshot),language_code:s.language_code,transcription_enabled:!!s.transcription_consent_at,recording_authorized:!!s.recording_consent_at},
   transcript:(utterances||[]).reverse(),suggestions:(suggestions||[]).reverse(),
-  recordings:canAccessCallAudio(a.role)&&s.recording_consent_at?(recordings||[]):[],audio_access:canAccessCallAudio(a.role)};
+  recordings:mayHearAudio?(recordings||[]):[],
+  browser_recording:mayHearAudio?browserRecording:null,
+  audio_access:canAccessCallAudio(a.role)};
 }
 function decryptKey(payload,secret){
  const normalized=String(secret||'').trim();
