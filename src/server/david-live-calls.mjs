@@ -523,11 +523,22 @@ export async function handleCallIntelligence(req,res,action){
    return response(res,200,{role:a.role,calls:(data||[]).map(s=>({call_sid:s.call_sid,company:safeCompany(s.company_snapshot),started_at:s.started_at,ended_at:s.ended_at,state:s.state,has_recording_permission:!!s.recording_consent_at&&canAccessCallAudio(a.role),transcription_authorized:!!s.transcription_consent_at,outcome:outcomeMap.get(s.call_sid)||null}))});
   }
   if(action==='live-status'){
-   let q=a.db.from('david_live_call_sessions').select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at').in('state',['initiated','ringing','in-progress']).order('started_at',{ascending:false}).limit(1);
-   if(a.role!=='admin')q=q.eq('worker_user_id',a.user.id);
+   // Desk always reports the SIGNED-IN operator's own active call, even for admins.
+   // Admin inbox has its own separate, authorized overview.
+   const q=a.db.from('david_live_call_sessions')
+    .select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at')
+    .eq('worker_user_id',a.user.id)
+    .in('state',['initiated','ringing','in-progress'])
+    .gte('started_at',new Date(Date.now()-20*60*1000).toISOString())
+    .order('started_at',{ascending:false}).limit(1);
    const {data,error}=await q.maybeSingle();
    if(error)return response(res,503,{error:'live_status_unavailable'});
-   if(!data)return response(res,200,{active:false});
+   const capabilities={
+    transcription_feature_enabled:process.env.DAVID_LIVE_TRANSCRIPTION_ENABLED==='true',
+    coach_feature_enabled:process.env.DAVID_LIVE_COACH_ENABLED==='true',
+    recording_feature_enabled:process.env.DAVID_LIVE_RECORDING_ENABLED==='true'&&process.env.ENABLE_RECORDING==='true'
+   };
+   if(!data)return response(res,200,{active:false,reason:'no_active_call',...capabilities});
    const recentNotesQuery=data.company_id?a.db.from('david_live_call_outcomes').select('disposition,notes,updated_at').eq('company_id',data.company_id).order('updated_at',{ascending:false}).limit(4):Promise.resolve({data:[],error:null});
    const confQuery=process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'?
     a.db.from('david_call_conferences').select('hold,transfer_status').eq('parent_call_sid',data.call_sid).maybeSingle():
@@ -545,9 +556,7 @@ export async function handleCallIntelligence(req,res,action){
    return response(res,200,{active:true,call_sid:data.call_sid,company:safeCompany(data.company_snapshot),state:data.state,
      conference_controls_enabled:process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true'&&!!conference.data&&!conference.error,
      on_hold:conference.data?.hold===true,transfer_status:conference.data?.transfer_status||null,
-     transcription_feature_enabled:process.env.DAVID_LIVE_TRANSCRIPTION_ENABLED==='true',
-     coach_feature_enabled:process.env.DAVID_LIVE_COACH_ENABLED==='true',
-     recording_feature_enabled:process.env.DAVID_LIVE_RECORDING_ENABLED==='true'&&process.env.ENABLE_RECORDING==='true',
+     ...capabilities,
      transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
      transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,
      transcription_stopped:!!data.transcription_stopped_at,
