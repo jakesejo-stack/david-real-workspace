@@ -25,7 +25,7 @@ test('Only authorized, active transcription is rendered, without audio-recording
  assert.match(api,/scope:type/);
  assert.match(api,/transcriptionEngine:'google',track:'both_tracks',partialResults:false/);
  assert.match(api,/inboundTrackLabel:'operator',outboundTrackLabel:'client'/);
- assert.match(api,/language==='bg-BG'\?\{speechModel:'short'\}/);
+ assert.match(api,/language==='bg-BG'\?\{speechModel:'short',enableAutomaticPunctuation:false\}/);
 });
 test('Unsigned webhooks rejected and AI only processes final client utterances',()=>{
  assert.match(api,/if\(!checkTwilio\(req,'live-transcript'\)\)return response\(res,403/);
@@ -98,4 +98,27 @@ test('operator always sees live caption controls before transcript while idle',(
  assert.match(ui,/Изчакай другият човек да вдигне/);
  assert.doesNotMatch(ui,/listen.disabled=data.state!=='in-progress'/);
  assert.match(api,/if\(live.status!=='in-progress'\)return response\(res,409/);
+});
+
+test('Twilio STT provider confirmation is required before claiming Live Captions are running',()=>{
+ assert.match(api,/transcription_provider_state:'started'/);
+ assert.match(api,/transcription_provider_state:'error'/);
+ assert.match(api,/transcription_error_code:errorCode/);
+ assert.match(api,/transcription_error_message:errorMessage/);
+ assert.match(api,/transcription_provider_state:data\.transcription_provider_state\|\|null/);
+ assert.match(api,/transcription_active:data\.transcription_provider_state==='started'&&!data\.transcription_stopped_at/);
+ assert.match(api,/accepted:true,started:false/);
+ assert.match(ui,/out\.accepted\?'○ Twilio прие заявката/);
+ assert.match(ui,/data\.transcription_provider_state==='error'/);
+ assert.match(ui,/Twilio прекъсна транскрипцията/);
+ assert.match(ui,/result\.textContent='';/);
+});
+test('Provider errors are distinct from manual STT stops and reveal a safe Twilio diagnostic code',()=>{
+ assert.match(api,/evt==='transcription-error'/);
+ assert.match(api,/TranscriptionErrorCode/);
+ assert.match(api,/TranscriptionError/);
+ assert.match(api,/evt==='transcription-stopped'/);
+ assert.match(api,/s\.transcription_provider_state==='error'\?'error':'stopped'/);
+ assert.match(ui,/transcription_error_code/);
+ assert.match(ui,/transcription_error_message/);
 });
