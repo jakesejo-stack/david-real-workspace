@@ -24,7 +24,7 @@ function install(){
  document.body.append(panel);
  panel.style.cssText='position:fixed;left:260px;right:0;top:160px;bottom:0;z-index:7;overflow:auto;background:#f3f7fd;padding:28px;display:none';
  const state=panel.querySelector('#sf-ai-state'),form=panel.querySelector('#sf-ai-form'),prompt=panel.querySelector('#sf-ai-prompt'),messages=panel.querySelector('#sf-ai-messages');
- const add=(who,message)=>{const item=document.createElement('div');item.className='notice';item.style.background=who==='DAVID'?'#e8f2ff':'#fff';const strong=document.createElement('strong');strong.textContent=who+': ';item.append(strong,document.createTextNode(message));messages.append(item);messages.scrollTop=messages.scrollHeight;};
+ const add=(who,message)=>{const item=document.createElement('div');item.className='notice';item.style.background=who==='DAVID'?'#e8f2ff':'#fff';const strong=document.createElement('strong');strong.textContent=who+': ';item.append(strong,document.createTextNode(message));messages.append(item);messages.scrollTop=messages.scrollHeight;return item;};
  let historyLoaded=false;
  const loadHistory=async()=>{
   if(historyLoaded)return;
@@ -41,7 +41,34 @@ function install(){
  const check=async()=>{try{const token=await authToken();const r=await fetch('/api/gemini-key',{headers:{Authorization:'Bearer '+token}});const data=await r.json();state.textContent=data.connected?'✓ Gemini свързан':'Gemini не е свързан';state.className='tag '+(data.connected?'green':'orange');}catch{state.textContent='Не може да се провери връзката';state.className='tag red';}};
  btn.addEventListener('click',()=>{visible=true;panel.style.display='block';document.body.classList.add('sf-ai-open');parent.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');check();loadHistory();});
  parent.addEventListener('click',event=>{if(event.target===btn||btn.contains(event.target))return;if(!visible)return;visible=false;panel.style.display='none';document.body.classList.remove('sf-ai-open');btn.classList.remove('active');},true);
- form.addEventListener('submit',async e=>{e.preventDefault();const message=prompt.value.trim();if(!message)return;const send=form.querySelector('button');send.disabled=true;add('Ти',message);prompt.value='';try{const token=await authToken();const r=await fetch('/api/soulflame-ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw Error(data.error||'AI error');add('DAVID',data.reply);}catch(error){add('Система',error.message);}finally{send.disabled=false;}});
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const message=prompt.value.trim();if(!message)return;
+  const send=form.querySelector('button');
+  send.disabled=true;
+  const originalLabel=send.textContent;
+  send.textContent='DAVID обработва заявката...';
+  const item=add('Ти',message);
+  const pending=add('Система','Свързвам се с Gemini за реален отговор...');
+  prompt.value='';
+  try{
+   const token=await authToken();
+   const r=await fetch('/api/soulflame-ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({message})});
+   const data=await r.json().catch(()=>({}));
+   if(!r.ok)throw Error(data.error||'Gemini не отговори. Опитай отново.');
+   if(typeof data.reply!=='string'||!data.reply.trim())throw Error('Gemini не върна текстов отговор.');
+   pending.remove();
+   add('DAVID',data.reply);
+  }catch(error){
+   pending.remove();
+   item.remove();
+   prompt.value=message+(prompt.value?'\n'+prompt.value:'');
+   add('Система',error.message+' Съобщението остава в полето, за да го изпратиш отново.');
+  }finally{
+   send.disabled=false;
+   send.textContent=originalLabel;
+  }
+ });
 }
 const css=document.createElement('style');css.textContent='body.sf-ai-open .main{visibility:hidden!important}body.sf-ai-open .nav button.active:not(#soulflame-ai-nav){background:transparent!important;color:#f1f5ff!important}body:not(.sf-ai-open) #soulflame-ai-nav.active{background:transparent!important;color:#f1f5ff!important}@media(max-width:880px){#soulflame-ai-view{left:0!important;top:90px!important;bottom:70px!important;padding:14px!important}}';document.head.append(css);
 document.addEventListener('click',event=>{const clicked=event.target.closest?.('.nav button');if(!clicked||clicked.id==='soulflame-ai-nav'||!visible)return;visible=false;document.body.classList.remove('sf-ai-open');const panel=document.getElementById('soulflame-ai-view');if(panel)panel.style.display='none';document.querySelectorAll('#soulflame-ai-nav').forEach(b=>b.classList.remove('active'));},true);
