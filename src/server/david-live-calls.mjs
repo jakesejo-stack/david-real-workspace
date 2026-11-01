@@ -203,7 +203,10 @@ async function handleConsent(req,res,a){
  const type=b.scope;
  if(!['transcription','recording'].includes(type)||b.clientConfirmed!==true||b.noticeVersion!=='david-v1'||b.method!=='verbal')return response(res,400,{error:'explicit_client_notice_and_permission_required'});
  const key=type==='transcription'?'transcription_consent_at':'recording_consent_at';
- if(s[key])return response(res,409,{error:'consent_already_recorded'});
+ // A failed STT startup may be retried during the same consented call.
+ // Never restart a stopped transcription or create duplicate active streams.
+ if(s[key]&&(type!=='transcription'||s.transcription_sid||s.transcription_stopped_at))
+  return response(res,409,{error:'consent_already_recorded'});
  const flag=type==='transcription'?'DAVID_LIVE_TRANSCRIPTION_ENABLED':'DAVID_LIVE_RECORDING_ENABLED';
  if(process.env[flag]!=='true')return response(res,503,{error:type+'_feature_not_approved'});
  if(type==='recording'&&process.env.ENABLE_RECORDING!=='true')return response(res,503,{error:'recording_feature_disabled'});
@@ -213,11 +216,13 @@ async function handleConsent(req,res,a){
  let live;
  try{live=await client.calls(sid).fetch()}catch{return response(res,502,{error:'twilio_call_verification_failed'})}
  if(live.status!=='in-progress')return response(res,409,{error:'twilio_call_not_connected'});
- const {error}=await a.db.from('david_live_call_sessions').update({
-   [key]:new Date().toISOString(),notice_version:'david-v1',consent_method:'operator_attested_verbal',
-   state:'in-progress',updated_at:new Date().toISOString()
- }).eq('call_sid',sid).eq('worker_user_id',a.user.id);
- if(error)return response(res,503,{error:'consent_audit_unavailable'});
+ if(!s[key]){
+  const {error}=await a.db.from('david_live_call_sessions').update({
+    [key]:new Date().toISOString(),notice_version:'david-v1',consent_method:'operator_attested_verbal',
+    state:'in-progress',updated_at:new Date().toISOString()
+  }).eq('call_sid',sid).eq('worker_user_id',a.user.id);
+  if(error)return response(res,503,{error:'consent_audit_unavailable'});
+ }
  // Twilio start is AFTER consent audit, never in initial dial TwiML.
  try{
   if(type==='transcription'){
@@ -544,7 +549,9 @@ export async function handleCallIntelligence(req,res,action){
      coach_feature_enabled:process.env.DAVID_LIVE_COACH_ENABLED==='true',
      recording_feature_enabled:process.env.DAVID_LIVE_RECORDING_ENABLED==='true'&&process.env.ENABLE_RECORDING==='true',
      transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
-     transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,recording_active:!!data.recording_sid&&!data.recording_stopped_at,
+     transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,
+     transcription_stopped:!!data.transcription_stopped_at,
+     recording_active:!!data.recording_sid&&!data.recording_stopped_at,
      latest_customer_line:customer?.content||null,latest_operator_line:operator?.content||null,
      suggestion:suggest.data?.[0]?.suggestion||null,suggestion_at:suggest.data?.[0]?.created_at||null,
      transcript:transcripts.map(x=>({...x,david_hint:hints.get(x.id)||null})),
