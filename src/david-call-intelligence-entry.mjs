@@ -2,6 +2,7 @@
 // Only authenticated real call sessions from Supabase appear here.
 import {createClient} from '@supabase/supabase-js';
 import {preparePlaybackBlob,formatAudioClock} from './david-audio-completeness.mjs';
+import {mountMicrophoneLiveCaptions} from './david-microphone-live-captions.mjs';
 let authClient=null,authConfig=null;
 async function getToken(){
  if(!authConfig)authConfig=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
@@ -256,7 +257,13 @@ function mountDesk(root){
  actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
  permissions.append(actions,result,notice);
- panel.append(meta,permissions,customer,operator,captionHead,captions,answer,adviceLabel);
+ const micPreview=mountMicrophoneLiveCaptions({
+  panel,language,
+  onText:text=>{
+   if(text)operator.textContent='Оператор · моят микрофон: '+text;
+  }
+ });
+ panel.append(meta,permissions,micPreview.view,customer,operator,captionHead,captions,answer,adviceLabel);
  heading.insertAdjacentElement('afterend',panel);
  let busy=false,timer=null,callSid=null,activationPending=false,lastCaptionSignature='';
  const renderCaptions=(lines,enabled)=>{
@@ -338,7 +345,7 @@ function mountDesk(root){
     callSid=null;listen.disabled=activationPending;listen.textContent='▶ Live Captions';record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;result.textContent='';
     captions.classList.add('is-idle');
     meta.textContent='Телефонът е свободен. Live Captions са готови за следващото обаждане.';
-    customer.textContent='Клиент: —';operator.textContent='Оператор: —';
+    customer.textContent='Клиент: —';operator.textContent=micPreview.getText()?'Оператор · моят микрофон: '+micPreview.getText():'Оператор: —';
     answer.textContent='DAVID: Изчаквам да започне разговорът.';
     captionState.textContent='● Изчаква обаждане';captionState.className='tag gray';
     renderCaptions([],false);
@@ -364,7 +371,7 @@ function mountDesk(root){
     data.transcription_authorized?'◌ Очаква се STT':'● Изчаква стартиране';
    captionState.className='tag '+(active&&transcriptRows.length?'green':data.transcription_provider_state==='error'?'red':'gray');
    customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
-   operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
+   operator.textContent='Оператор: '+(micPreview.getText()||active&&data.latest_operator_line||'Очаквам речта на оператора');
    if(active&&!transcriptRows.length&&secondsWaiting>12000){
     if(lastCaptionSignature!=='missing_stt'){
      captions.replaceChildren(node('p','muted','Twilio е стартирал транскрипция, но още не е изпратил завършена реплика. Проверете езика и състоянието на Twilio.'));
@@ -398,7 +405,7 @@ function mountDesk(root){
   finally{busy=false;}
  };
  update();
- timer=setInterval(()=>{if(document.visibilityState==='visible'&&panel.isConnected&&panel.offsetParent!==null)update();if(!panel.isConnected)clearInterval(timer);},1500);
+ timer=setInterval(()=>{if(document.visibilityState==='visible'&&panel.isConnected&&panel.offsetParent!==null)update();if(!panel.isConnected){micPreview.stop();clearInterval(timer)}},1500);
 }
 let scheduled=false;
 const observer=new MutationObserver(()=>{
@@ -417,6 +424,13 @@ css.textContent=`
 .david-ci-table tr:last-child td{border-bottom:0}
 .david-ci-table-secondary{display:block;color:#617b94;font-size:11px;margin-top:4px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
+.david-mic-preview{margin:14px 0;padding:14px;border:1px solid #a7d7cb;border-radius:14px;background:#edfdf7}
+.david-mic-preview-head{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
+.david-mic-preview-controls{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:12px}
+.david-mic-interim{background:#fff;border:1px solid #c1e6d8;border-radius:10px;padding:12px;min-height:56px;font-size:16px;line-height:1.45;margin:12px 0 6px;overflow-wrap:anywhere}
+.david-mic-history{max-height:125px;overflow-y:auto}
+.david-mic-final{margin:6px 0;font-size:13px;color:#24634f}
+.david-mic-preview .tiny{font-size:11px;color:#4a7569;line-height:1.45}
 .david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
 .david-ci-consent-actions select{width:auto;flex:0 1 180px}
 .david-ci-permissions[hidden]{display:none!important}
