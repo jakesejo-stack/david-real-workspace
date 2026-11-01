@@ -4,11 +4,12 @@ import {createClient} from '@supabase/supabase-js';
 // Supabase's session_id is stable across token refresh and changes after a new login.
 const PROFILE_MARKER_PREFIX='david:profile-confirmed:';
 const confirmedThisTab=new Set();
-let client=null,configured=null;
+let client=null,initPromise=null;
 async function authClient(){
- if(!configured)configured=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
- if(!configured.supabaseUrl||!configured.supabaseAnonKey)throw Error('No auth configuration');
- if(!client){
+ if(client)return client;
+ if(!initPromise)initPromise=(async()=>{
+  const configured=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
+  if(!configured.supabaseUrl||!configured.supabaseAnonKey)throw Error('No auth configuration');
   client=createClient(configured.supabaseUrl,configured.supabaseAnonKey);
   client.auth.onAuthStateChange(event=>{
    if(event!=='SIGNED_OUT')return;
@@ -20,8 +21,9 @@ async function authClient(){
     }
    }catch{}
   });
- }
- return client;
+  return client;
+ })().catch(error=>{initPromise=null;throw error});
+ return initPromise;
 }
 async function session(){
  const auth=await authClient();
@@ -70,7 +72,7 @@ function validSavedProfile(p){
 function mountProfile(panel){
  const section=document.createElement('section');
  section.className='card';
- section.innerHTML='<h2>Моят профил в SoulFlame</h2><p class="muted">Данните са свързани с потвърдения ти Google акаунт.</p><p id="david-profile-loading" class="muted" role="status">Проверявам профила...</p><div id="david-profile-confirmed" hidden role="status" aria-live="polite" style="margin:14px 0;color:#087c4d"><strong>✓ Профилът е запазен успешно</strong><p class="tiny" style="margin:6px 0 0">Данните са потвърдени за тази сесия. При следващ вход можеш отново да ги редактираш.</p></div><form class="stack" id="david-personal-profile" hidden><label>Имена<input name="full_name" class="field" maxlength="120" required autocomplete="name"></label><label>Град<input name="city" class="field" maxlength="100" required autocomplete="address-level2"></label><label>Телефонен номер<input name="phone" class="field" maxlength="40" required autocomplete="tel"></label><label>Потвърден Gmail<input name="gmail" class="field" type="email" readonly></label><button class="btn primary" type="submit">Запази профила</button></form><p role="status" aria-live="polite" id="david-profile-status"></p><div style="margin-top:18px;border-top:1px solid #e0e9f5;padding-top:15px"><strong>Gemini · Soulflame AI</strong><p id="david-profile-gemini-status" class="muted" role="status" aria-live="polite">Проверка на връзката...</p><div id="david-profile-gemini-setup" hidden><p class="tiny">Свържи личния си Gemini ключ веднъж. Ключът се криптира на сървъра и не се показва повторно.</p><p><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">🔑 Генерирай Gemini API ключ</a></p><form id="david-profile-gemini-form" class="stack"><label>Gemini API ключ<input type="password" name="key" class="field" autocomplete="off" spellcheck="false" placeholder="Постави API ключа"></label><button type="submit" class="btn primary">Свържи Gemini</button></form></div></div>';
+ section.innerHTML='<h2>Моят профил в SoulFlame</h2><p class="muted">Данните са свързани с потвърдения ти Google акаунт.</p><p id="david-profile-loading" class="muted" role="status">Проверявам профила...</p><div id="david-profile-confirmed" hidden role="status" aria-live="polite" style="margin:14px 0;color:#087c4d"><strong>✓ Профилът е запазен успешно</strong><p class="tiny" style="margin:6px 0 0">Данните са потвърдени за тази сесия. При следващ вход можеш отново да ги редактираш.</p></div><form class="stack" id="david-personal-profile" hidden style="display:none"><label>Имена<input name="full_name" class="field" maxlength="120" required autocomplete="name"></label><label>Град<input name="city" class="field" maxlength="100" required autocomplete="address-level2"></label><label>Телефонен номер<input name="phone" class="field" maxlength="40" required autocomplete="tel"></label><label>Потвърден Gmail<input name="gmail" class="field" type="email" readonly></label><button class="btn primary" type="submit">Запази профила</button></form><p role="status" aria-live="polite" id="david-profile-status"></p><div style="margin-top:18px;border-top:1px solid #e0e9f5;padding-top:15px"><strong>Gemini · Soulflame AI</strong><p id="david-profile-gemini-status" class="muted" role="status" aria-live="polite">Проверка на връзката...</p><div id="david-profile-gemini-setup" hidden><p class="tiny">Свържи личния си Gemini ключ веднъж. Ключът се криптира на сървъра и не се показва повторно.</p><p><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">🔑 Генерирай Gemini API ключ</a></p><form id="david-profile-gemini-form" class="stack"><label>Gemini API ключ<input type="password" name="key" class="field" autocomplete="off" spellcheck="false" placeholder="Постави API ключа"></label><button type="submit" class="btn primary">Свържи Gemini</button></form></div></div>';
  panel.replaceChildren(section);
  const loading=section.querySelector('#david-profile-loading');
  const form=section.querySelector('#david-personal-profile');
