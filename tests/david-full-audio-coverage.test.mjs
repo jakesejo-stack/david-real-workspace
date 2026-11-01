@@ -32,15 +32,17 @@ test('Recorded audio starts only after verbal client consent and continues until
  assert.match(frontend,/duration_ms:elapsedMs/);
 });
 
-test('Admin downloads entire audio before playback rather than streaming over 60s expiring URL',()=>{
- assert.match(frontend,/const response=await fetch\(data\.url,\{cache:'no-store'\}\)/);
- assert.match(frontend,/fileBlob=await response\.blob\(\)/);
- assert.match(frontend,/preparePlaybackBlob\(fileBlob\)/);
- assert.match(frontend,/objectUrl=URL\.createObjectURL\(prepared\.blob\)/);
- assert.match(frontend,/player\.controls=true/);
- assert.match(frontend,/player\.preload='auto'/);
- assert.match(frontend,/Частичен запис/);
+test('Admin popup downloads the complete authorized file and keeps its actual media duration',()=>{
+ assert.match(detail,/const link=await callApi\('browser-record-link'/);
+ assert.match(detail,/resp=await fetch\(link.url,\{cache:'no-store'\}\)/);
+ assert.match(detail,/const blob=await resp.blob\(\)/);
  assert.match(detail,/preparePlaybackBlob\(blob\)/);
+ assert.match(detail,/playerBlob=URL.createObjectURL\(prepared.blob\)/);
+ assert.match(detail,/audio.controls=true/);
+ assert.match(detail,/audio.preload='auto'/);
+ assert.match(detail,/Записът започва след съгласие/);
+ assert.match(detail,/if\(shell.style.display!=='flex'\|\|!holder.isConnected\)return/);
+ assert.doesNotMatch(detail,/audio.play\(\)/);
 });
 
 test('Server persists recording duration and reason with admin-only playback',()=>{
