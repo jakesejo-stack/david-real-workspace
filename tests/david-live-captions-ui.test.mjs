@@ -58,3 +58,11 @@ test('No-call screen links to the real Free Call dialer and checks Twilio/task a
  assert.match(ui,/Не може да се набере още/);
  assert.match(ui,/lastCaptionSignature='missing_stt'/);
 });
+
+test('Free Call admin can load only their own approved task while Twilio keeps strict matching',()=>{
+ const compiled=readFileSync(new URL('../recovery/compiled-frontend/assets/index-p3-2.js',import.meta.url),'utf8');
+ assert.match(compiled,/includes\(g\.role\)\?'<div class="card" id="deskWorkerTask"/);
+ assert.match(compiled,/if\(!\["worker","admin"\]\.includes\(g\.role\)\)/);
+ assert.match(compiled,/auth\.dialTo!==requested/);
+ assert.match(compiled,/Номерът трябва да съвпада с назначения от Admin номер/);
+});
