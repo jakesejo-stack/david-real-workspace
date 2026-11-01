@@ -1,7 +1,8 @@
 import {createClient} from '@supabase/supabase-js';
-let supabase;
+let supabase,configPromise;
 async function authToken(){
- const config=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
+ if(!configPromise)configPromise=fetch('/api/config',{cache:'no-store'}).then(r=>r.json()).catch(e=>{configPromise=null;throw e});
+ const config=await configPromise;
  if(!supabase)supabase=createClient(config.supabaseUrl,config.supabaseAnonKey);
  const {data:{session}}=await supabase.auth.getSession();
  if(!session?.access_token)throw Error('Влез първо с Google.');
