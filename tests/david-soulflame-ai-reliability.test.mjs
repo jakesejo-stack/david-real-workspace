@@ -14,7 +14,7 @@ test('Soulflame AI returns genuine text from primary Gemini without backup',asyn
   assert.match(url,/gemini-3\.5-flash-lite:generateContent/);
   assert.equal(init.headers['x-goog-api-key'],'test-api-key');
   assert.equal(JSON.parse(init.body).generationConfig.thinkingConfig.thinkingLevel,'minimal');
-  assert.equal(JSON.parse(init.body).generationConfig.maxOutputTokens,150);
+  assert.equal(JSON.parse(init.body).generationConfig.maxOutputTokens,120);
   return good('Аз съм DAVID, AI асистентът на SoulFlame.');
  };
  const result=await generateGeminiChat({apiKey:'test-api-key',contents,fetchImpl:call});
@@ -64,4 +64,22 @@ test('API stores history only after real reply, in one atomic insert',()=>{
  assert.match(frontend,/prompt\.value=message\+\(prompt\.value\?/);
  assert.match(frontend,/send\.textContent='DAVID обработва заявката\.\.\.'/);
  assert.deepEqual(CHAT_MODELS.map(m=>m.name),['gemini-3.5-flash-lite','gemini-3.1-flash-lite']);
+});
+
+test('hedge starts backup before primary timeout, and cancels the unused request',async()=>{
+ let startedPrimary=false,abortedPrimary=false,startedSecondary=false;
+ const result=await generateGeminiChat({apiKey:'test-api-key',contents,hedgeAfterMs:5,fetchImpl:async(url,options)=>{
+  if(url.includes('3.5')){
+   startedPrimary=true;
+   return new Promise((_,reject)=>{
+    options.signal.addEventListener('abort',()=>{abortedPrimary=true;reject(Object.assign(new Error('cancelled'),{name:'AbortError'}))},{once:true});
+   });
+  }
+  startedSecondary=true;
+  return good('Готово.');
+ }});
+ assert.equal(startedPrimary,true);
+ assert.equal(startedSecondary,true);
+ assert.equal(result.reply,'Готово.');
+ assert.equal(abortedPrimary,true);
 });
