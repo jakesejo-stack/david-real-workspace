@@ -228,6 +228,21 @@ function mountDesk(root){
  panel.append(node('h2','','✦ DAVID · Live Operator Coach'));
  panel.append(node('p','muted','DAVID слуша само след разрешено транскрибиране. Операторът чете подсказката и решава дали да я използва.'));
  const meta=node('p','muted','Проверка на активния разговор...');
+ const startHelp=node('div','david-ci-start-help');
+ const startMessage=node('p','muted','Live Captions се включват само към свързан Twilio разговор. Започни обаждане от телефонния панел по-долу.');
+ const gotoCall=node('button','btn primary','☎ Към набиране');
+ gotoCall.type='button';
+ gotoCall.addEventListener('click',()=>{
+  const dial=[...root.querySelectorAll('.sf-sales-phone-actions button')]
+   .find(x=>/Набери/.test(x.textContent||''));
+  if(dial){
+   dial.scrollIntoView({behavior:'smooth',block:'center'});
+   dial.focus({preventScroll:true});
+  }else{
+   meta.textContent='Няма достъпен телефонен панел. Отвори ЗАДАЧИ и провери одобрената задача за обаждане.';
+  }
+ });
+ startHelp.append(startMessage,gotoCall);
  const customer=node('div','david-ci-utterance','Клиент: —');
  const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
  const captionHead=node('div','david-ci-captions-head');
@@ -256,7 +271,7 @@ function mountDesk(root){
  actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
  permissions.append(notice,actions,result);
- panel.append(meta,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
+ panel.append(meta,startHelp,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
  heading.insertAdjacentElement('afterend',panel);
  let busy=false, timer=null,callSid=null,lastCaptionSignature='';
  const renderCaptions=(lines,enabled)=>{
@@ -323,17 +338,32 @@ function mountDesk(root){
   if(busy||!panel.isConnected)return;busy=true;
   try{
    const data=await callApi('live-status');
-   if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';operator.textContent='Оператор: —';answer.textContent='DAVID: Очаквам разговор.';captionState.textContent='● Чака разговор';captionState.className='tag gray';renderCaptions([],false);return;}
-   callSid=data.call_sid;permissions.hidden=false;
+   if(!data.active){
+    callSid=null;permissions.hidden=true;startHelp.hidden=false;
+    meta.textContent='Няма активно Twilio обаждане. Надписите не могат да започнат преди реален разговор.';
+    customer.textContent='Клиент: —';operator.textContent='Оператор: —';
+    answer.textContent='DAVID: Изчаквам да започне разговорът.';
+    captionState.textContent='● Изчаква обаждане';captionState.className='tag gray';
+    renderCaptions([],false);
+    return;
+   }
+   callSid=data.call_sid;permissions.hidden=false;startHelp.hidden=true;
    listen.disabled=!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
    const active=!!data.transcription_active;
-   captionState.textContent=active?'● LIVE CAPTIONS':data.transcription_authorized?'○ Транскрипцията е спряна':'● Изключено до съгласие';
+   const transcriptRows=data.transcript||[];
+   const lastSegment=transcriptRows.at(-1);
+   const secondsWaiting=Date.now()-Date.parse(lastSegment?.created_at||data.transcription_started_at||Date.now());
+   captionState.textContent=active?(transcriptRows.length?'● LIVE CAPTIONS':secondsWaiting>12000?'⚠ Няма реч от Twilio':'● Twilio слуша'):data.transcription_stopped?'○ Транскрипцията е спряна':data.transcription_authorized?'○ Очаква се STT':'● Изключено до съгласие';
    captionState.className='tag '+(active?'green':'gray');
    customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
    operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
    renderCaptions(data.transcript,active);
+   if(active&&!transcriptRows.length&&secondsWaiting>12000){
+    captions.replaceChildren(node('p','muted','Twilio е свързан към транскрипцията, но не е изпратил завършена реплика. Проверете езика, говорете на глас и проверете Twilio състоянието.'));
+    lastCaptionSignature='';
+   }
    const lastClient=active?(data.transcript||[]).filter(x=>x.speaker==='client').at(-1):null;
    const latestHint=lastClient?.david_hint;
    answer.textContent='DAVID: '+(!active?'Включи транскрипцията след съгласие, за да получаваш AI подсказки.':latestHint||(
@@ -364,6 +394,9 @@ css.textContent=`
 .david-ci-table tr:last-child td{border-bottom:0}
 .david-ci-table-secondary{display:block;color:#617b94;font-size:11px;margin-top:4px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
+.david-ci-start-help{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px;border:1px solid #c8d8ef;border-radius:12px;background:#f1f6ff;margin:14px 0}
+.david-ci-start-help p{margin:0}
+.david-ci-start-help[hidden]{display:none!important}
 .david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
 .david-ci-consent-actions select{width:auto;flex:0 1 180px}
 .david-ci-permissions[hidden]{display:none!important}
