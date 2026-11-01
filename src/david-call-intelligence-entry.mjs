@@ -74,7 +74,9 @@ async function openCall(sid,trigger){
   if(c.research_notes)company.append(node('p','david-ci-pre',c.research_notes));
   body.append(company);
   const sound=node('section','david-ci-section');
+  const actualCallMs=s.started_at&&s.ended_at?Math.max(0,Date.parse(s.ended_at)-Date.parse(s.started_at)):null;
   sound.append(sectionTitle('🎧 Аудиозапис на разговора'));
+  if(Number.isFinite(actualCallMs))sound.append(node('p','david-ci-call-clock','⏱ Реален разговор: '+formatAudioClock(actualCallMs)));
   const browserRecording=data.browser_recording?.status==='completed'?data.browser_recording:null;
   const twilioRecord=(data.recordings||[]).find(x=>x.status==='completed');
   if(!s.recording_authorized){
@@ -110,12 +112,26 @@ async function openCall(sid,trigger){
      playerBlob=URL.createObjectURL(prepared.blob);
      const audio=node('audio','david-ci-player');audio.controls=true;audio.preload='auto';audio.src=playerBlob;
      audio.setAttribute('aria-label','Целият съхранен запис на разговора с '+(c.company_name||'клиента'));
-     const heardMs=prepared.durationMs||Number(browserRecording?.record_duration_ms)||null;
+     let heardMs=prepared.durationMs||Number(browserRecording?.record_duration_ms)||null;
      const duration=node('p','muted',heardMs?'Дължина на съхраненото аудио: '+formatAudioClock(heardMs):
       'Целият наличен аудиофайл е зареден. Времетраенето се проверява от браузъра.');
-     const callMs=s.started_at&&s.ended_at?Date.parse(s.ended_at)-Date.parse(s.started_at):null;
-     if(heardMs&&callMs&&heardMs+8000<callMs)duration.textContent+=' · Записът е по-кратък от телефонната сесия, защото започва след съгласието.';
-     holder.replaceChildren(audio,duration,node('p','muted','▶ Play / Pause / превъртане на целия съхранен файл.'));
+     const playbackClock=node('p','david-ci-playback-clock','🎧 Аудио: 00:00 / '+(heardMs?formatAudioClock(heardMs):'--:--'));
+     const updateAudioTime=()=>{
+      const played=Number.isFinite(audio.currentTime)&&audio.currentTime>=0?formatAudioClock(audio.currentTime*1000):'00:00';
+      const audioMs=Number.isFinite(audio.duration)&&audio.duration>0?audio.duration*1000:heardMs;
+      playbackClock.textContent='🎧 Аудио: '+played+' / '+(audioMs?formatAudioClock(audioMs):'--:--');
+     };
+     audio.addEventListener('loadedmetadata',()=>{
+      if(Number.isFinite(audio.duration)&&audio.duration>0){
+       heardMs=audio.duration*1000;
+       duration.textContent='Дължина на съхраненото аудио: '+formatAudioClock(heardMs);
+       if(Number.isFinite(actualCallMs)&&heardMs+8000<actualCallMs)duration.textContent+=' · Записът започва след съгласие или е прекъснат преди края.';
+      }
+      updateAudioTime();
+     });
+     for(const name of ['timeupdate','seeked','durationchange','ended'])audio.addEventListener(name,updateAudioTime);
+     if(heardMs&&Number.isFinite(actualCallMs)&&heardMs+8000<actualCallMs)duration.textContent+=' · Записът започва след съгласие или е прекъснат преди края.';
+     holder.replaceChildren(audio,playbackClock,duration,node('p','muted','▶ Play / Pause / превъртане на целия съхранен файл.'));
      playButton.textContent='↻ Зареди отново аудиото';
      callApi('admin-mark-read',{}, {method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({call_sid:sid,kind:'audio'})}).catch(()=>{});
@@ -276,6 +292,8 @@ css.textContent=`
 .david-ci-line{padding:12px;background:#f0f5ff;border-radius:10px;margin:9px 0}
 .david-ci-line small{color:#516582}.david-ci-line p{margin:6px 0 0;white-space:pre-wrap}
 .david-ci-client{background:#fff5e8}
+.david-ci-call-clock{font-size:15px;font-weight:750;color:#144f61;margin:9px 0}
+.david-ci-playback-clock{font-size:15px;font-weight:700;color:#193d5c;font-variant-numeric:tabular-nums;margin:8px 0}
 .david-ci-audio-holder{margin-top:12px}
 .david-ci-player{width:100%;display:block;margin:12px 0}
 @media(max-width:690px){.david-ci-modal{padding:0}.david-ci-dialog{width:100%;height:100dvh;max-height:none;border-radius:0}.david-ci-dialog-header{padding:12px}.david-ci-dialog-body{padding:12px 12px 90px}.david-ci-grid{grid-template-columns:1fr}.david-ci-record button{width:100%}}
