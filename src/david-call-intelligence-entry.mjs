@@ -233,8 +233,9 @@ function mountDesk(root){
  const gotoCall=node('button','btn primary','☎ Към набиране');
  gotoCall.type='button';
  gotoCall.addEventListener('click',()=>{
-  const dial=[...root.querySelectorAll('.sf-sales-phone-actions button')]
-   .find(x=>/Набери/.test(x.textContent||''));
+  const dial=root.querySelector('#deskCallStart')||
+   [...root.querySelectorAll('.sf-sales-phone-actions button')]
+    .find(x=>/Набери/.test(x.textContent||''));
   if(dial){
    dial.scrollIntoView({behavior:'smooth',block:'center'});
    dial.focus({preventScroll:true});
@@ -242,7 +243,32 @@ function mountDesk(root){
    meta.textContent='Няма достъпен телефонен панел. Отвори ЗАДАЧИ и провери одобрената задача за обаждане.';
   }
  });
- startHelp.append(startMessage,gotoCall);
+ const verifyCall=node('button','btn subtle','Провери Twilio и задача');
+ verifyCall.type='button';
+ const preflightFeedback=node('p','tiny','');
+ verifyCall.addEventListener('click',async()=>{
+  verifyCall.disabled=true;
+  preflightFeedback.textContent='Проверявам телефонната готовност без да набирам номер...';
+  try{
+   const info=await callApi('task-preflight');
+   const errors=info.errors||[];
+   const names={
+    approved_task_missing:'Няма разрешена задача и номер за днес',
+    daily_attempt_already_used:'Дневният лимит за обаждания е достигнат',
+    missing_server_config:'Липсва Twilio настройка на сървъра',
+    live_calls_disabled:'Изходящите разговори са изключени',
+    twilio_account_auth_invalid:'Twilio акаунтът не е валидиран',
+    twilio_api_key_invalid:'Twilio API ключът е невалиден',
+    twiml_voice_url_wrong:'Twilio Voice URL е неправилен',
+    caller_id_not_verified:'Номерът за изходящо обаждане не е потвърден',
+    trial_destination_not_verified:'Тестовият получател не е потвърден в Twilio'
+   };
+   preflightFeedback.textContent=info.ready?'✓ Twilio и дневната задача са готови. Натисни Към набиране.':
+    'Не може да се набере още: '+(errors.map(x=>names[x]||x).join(' · ')||'Неизвестна причина');
+  }catch(error){preflightFeedback.textContent='Проверката е неуспешна: '+error.message}
+  finally{verifyCall.disabled=false}
+ });
+ startHelp.append(startMessage,gotoCall,verifyCall,preflightFeedback);
  const customer=node('div','david-ci-utterance','Клиент: —');
  const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
  const captionHead=node('div','david-ci-captions-head');
