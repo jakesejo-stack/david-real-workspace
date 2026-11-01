@@ -7,6 +7,9 @@ on:
       - "api/integrations/david/**"
       - "src/server/**"
       - "src/david-call-intelligence-entry.mjs"
+      - "src/profile-gemini-entry.mjs"
+      - "src/operator-api-panel.mjs"
+      - "tests/profile-session-ux.test.mjs"
       - "tests/david-live-call-security.test.mjs"
       - ".github/workflows/david-live-coach-qa.yml"
   workflow_dispatch:
@@ -30,5 +33,7 @@ jobs:
           node --check 'api/integrations/david/[action].js'
           node --check src/server/david-live-calls.mjs
           node --check src/david-call-intelligence-entry.mjs
+          node --check src/profile-gemini-entry.mjs
+          node --check src/operator-api-panel.mjs
       - name: Run all unit and security tests
         run: node --test tests/*.test.mjs
