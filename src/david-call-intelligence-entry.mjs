@@ -307,7 +307,9 @@ function mountDesk(root){
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({call_sid:callSid,scope,...attestation,noticeVersion:'david-v1',method:'verbal',language_code:language.value})
    });
-   result.textContent=out.started?'✓ '+(scope==='recording'?'Аудиозаписът':'Live Captions')+' е стартиран.':'Twilio не потвърди стартиране.';
+   result.textContent=scope==='transcription'
+    ?(out.accepted?'○ Twilio прие заявката. Изчаквам реално потвърждение от STT доставчика...':'Транскрипцията още не е активна.')
+    :(out.started?'✓ Аудиозаписът е стартиран.':'Twilio не потвърди записа.');
   }catch(error){result.textContent='Не е активирано: '+(error.message==='twilio_call_not_connected'?'Изчакай другият човек да вдигне, после натисни отново.':error.message);}
   finally{activationPending=false;button.disabled=false;update();}
  };
@@ -333,7 +335,7 @@ function mountDesk(root){
   try{
    const data=await callApi('live-status');
    if(!data.active){
-    callSid=null;listen.disabled=activationPending;listen.textContent='▶ Live Captions';record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;
+    callSid=null;listen.disabled=activationPending;listen.textContent='▶ Live Captions';record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;result.textContent='';
     captions.classList.add('is-idle');
     meta.textContent='Телефонът е свободен. Live Captions са готови за следващото обаждане.';
     customer.textContent='Клиент: —';operator.textContent='Оператор: —';
@@ -355,8 +357,12 @@ function mountDesk(root){
    const transcriptRows=data.transcript||[];
    const lastSegment=transcriptRows.at(-1);
    const secondsWaiting=Date.now()-Date.parse(lastSegment?.created_at||data.transcription_started_at||Date.now());
-   captionState.textContent=active?(transcriptRows.length?'● LIVE CAPTIONS':secondsWaiting>12000?'⚠ Няма реч от Twilio':'● Twilio слуша'):data.transcription_stopped?'○ Транскрипцията е спряна':data.transcription_authorized?'○ Очаква се STT':'● Изчаква стартиране';
-   captionState.className='tag '+(active?'green':'gray');
+   captionState.textContent=data.transcription_provider_state==='error'?'⛔ Грешка от Twilio':
+    active?(transcriptRows.length?'● LIVE CAPTIONS':secondsWaiting>12000?'⚠ Няма получена реч':'○ STT свързан'):
+    data.transcription_start_pending?'◌ STT стартира':
+    data.transcription_stopped?'○ Транскрипцията е спряна':
+    data.transcription_authorized?'◌ Очаква се STT':'● Изчаква стартиране';
+   captionState.className='tag '+(active&&transcriptRows.length?'green':data.transcription_provider_state==='error'?'red':'gray');
    customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
    operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
    if(active&&!transcriptRows.length&&secondsWaiting>12000){
@@ -373,7 +379,21 @@ function mountDesk(root){
     lastClient?(data.coach_feature_enabled===false?'AI подсказките още не са активирани.':
      Date.now()-Date.parse(lastClient.created_at||0)>10000?'Няма получена подсказка за тази реплика. Продължи разговора самостоятелно.':'Обработвам последната клиентска реплика...'):'Изчаквам клиента. Ще предложа какво да кажеш след неговата реплика.'
    ));
-   if(data.transcription_feature_enabled===false&&!data.transcription_authorized)result.textContent='Live Captions са подготвени, но още не са активирани от администратора.';
+   if(data.transcription_provider_state==='error'){
+    result.textContent='⛔ Twilio прекъсна транскрипцията: '+(data.transcription_error_code||'без код')+
+     (data.transcription_error_message?' · '+data.transcription_error_message:'')+
+     '. AI подсказките няма да работят без транскрипция.';
+   }else if(data.transcription_provider_state==='stopped'&&data.transcription_authorized){
+    result.textContent='○ Транскрипцията е спряна от Twilio.';
+   }else if(data.transcription_start_pending){
+    result.textContent='◌ Twilio е приел заявката, но STT все още не е потвърдил, че е активен.';
+   }else if(active&&transcriptRows.length){
+    result.textContent='✓ Реални Live Captions: '+transcriptRows.length+' получени реплики.';
+   }else if(active){
+    result.textContent='○ STT е стартиран от Twilio. Изчаквам първа завършена реплика.';
+   }else if(data.transcription_feature_enabled===false){
+    result.textContent='Live Captions са изключени от администратора.';
+   }
   }catch(error){meta.textContent='Live Coach: '+error.message}
   finally{busy=false;}
  };
