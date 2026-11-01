@@ -1,5 +1,5 @@
 // DAVID secure call intelligence API. Imported by the EXISTING catch-all API function.
-// Never starts a paid call or processes media without verified authorization and consent.
+// Never starts a paid call or processes media without authenticated operator authorization and the appropriate notice/permission.
 import {createDecipheriv,createHash,randomUUID} from 'node:crypto';
 import twilio from 'twilio';
 import {generateGeminiChat,GeminiChatError} from './david-gemini-chat.mjs';
@@ -201,7 +201,15 @@ async function handleConsent(req,res,a){
  if(ae||!attempt)return response(res,403,{error:'not_an_approved_task_call'});
  if(!['initiated','ringing','in-progress'].includes(s.state))return response(res,409,{error:'call_not_active'});
  const type=b.scope;
- if(!['transcription','recording'].includes(type)||b.clientConfirmed!==true||b.noticeVersion!=='david-v1'||b.method!=='verbal')return response(res,400,{error:'explicit_client_notice_and_permission_required'});
+ if(!['transcription','recording'].includes(type)||b.noticeVersion!=='david-v1'||b.method!=='verbal')
+  return response(res,400,{error:'invalid_media_activation_request'});
+ // Speech transcription and AI suggestions are personal-data processing, not
+ // audio recording. Operator attests to notice + independently assessed lawful
+ // basis for transcription; recording has its own explicit client permission.
+ if(type==='transcription'&&(b.noticeDelivered!==true||b.lawfulBasisConfirmed!==true))
+  return response(res,400,{error:'transcription_notice_and_lawful_basis_required'});
+ if(type==='recording'&&b.clientConfirmed!==true)
+  return response(res,400,{error:'explicit_recording_permission_required'});
  const key=type==='transcription'?'transcription_consent_at':'recording_consent_at';
  // A failed STT startup may be retried during the same consented call.
  // Never restart a stopped transcription or create duplicate active streams.
@@ -217,13 +225,18 @@ async function handleConsent(req,res,a){
  try{live=await client.calls(sid).fetch()}catch{return response(res,502,{error:'twilio_call_verification_failed'})}
  if(live.status!=='in-progress')return response(res,409,{error:'twilio_call_not_connected'});
  if(!s[key]){
+  // The legacy transcription_consent_at column is used as a per-call
+  // authorization timestamp for compatibility, NOT proof of client consent.
   const {error}=await a.db.from('david_live_call_sessions').update({
-    [key]:new Date().toISOString(),notice_version:'david-v1',consent_method:'operator_attested_verbal',
+    [key]:new Date().toISOString(),notice_version:'david-v1',
+    consent_method:type==='transcription'
+     ?'operator_attested_notice_and_lawful_basis'
+     :'operator_attested_explicit_recording_permission',
     state:'in-progress',updated_at:new Date().toISOString()
   }).eq('call_sid',sid).eq('worker_user_id',a.user.id);
-  if(error)return response(res,503,{error:'consent_audit_unavailable'});
+  if(error)return response(res,503,{error:'media_authorization_audit_unavailable'});
  }
- // Twilio start is AFTER consent audit, never in initial dial TwiML.
+ // Twilio starts only AFTER per-call legal-basis/notice or recording-permission audit, never in initial dial TwiML.
  try{
   if(type==='transcription'){
    const language=['bg-BG','en-US','es-ES','de-DE','fr-FR'].includes(b.language_code)
@@ -239,7 +252,7 @@ async function handleConsent(req,res,a){
    if(!transOK(t.sid))throw Error('invalid_transcription_sid');
    const {error:writeError}=await a.db.from('david_live_call_sessions').update({transcription_sid:t.sid,updated_at:new Date().toISOString()}).eq('call_sid',sid);
    if(writeError)console.warn('DAVID transcription SID metadata write failed');
-   return response(res,200,{consent_logged:true,started:true,scope:type});
+   return response(res,200,{authorization_logged:true,started:true,scope:type});
   }
   const recording=await client.calls(sid).recordings.create({
    recordingChannels:'dual',recordingTrack:'both',
@@ -252,11 +265,11 @@ async function handleConsent(req,res,a){
   },{onConflict:'recording_sid'});
   if(writeError)console.warn('DAVID recording metadata write failed');
   await a.db.from('david_live_call_sessions').update({recording_sid:recording.sid,updated_at:new Date().toISOString()}).eq('call_sid',sid);
-  return response(res,200,{consent_logged:true,started:true,scope:type});
+  return response(res,200,{authorization_logged:true,started:true,scope:type});
  }catch(err){
   // A failed provider start must not be presented as a successful recording/transcription.
-  console.warn('DAVID consented provider activation failed',type,err?.status||err?.code||'unknown');
-  return response(res,502,{error:'twilio_'+type+'_activation_failed',consent_logged:true,started:false});
+  console.warn('DAVID authorized provider activation failed',type,err?.status||err?.code||'unknown');
+  return response(res,502,{error:'twilio_'+type+'_activation_failed',authorization_logged:true,started:false});
  }
 }
 async function audio(req,res,a){
