@@ -184,19 +184,18 @@ function mountCallRecords(root){
  const panel=node('section','card david-ci-list');panel.id='david-call-records-extra';
  const hdr=node('div','david-ci-list-header');hdr.append(node('h2','','DAVID · История на разговорите'));
  const refresh=node('button','btn subtle','↻ Обнови');refresh.type='button';hdr.append(refresh);panel.append(hdr);
- panel.append(node('p','muted','Разговорите са в една таблица. Натисни ред, за да отвориш детайлите. Аудиото е достъпно само за администратори.'));
+ panel.append(node('p','muted','Преглед на историята на обажданията. Подробностите и аудиозаписите се отварят само през Admin Panel от администратори.'));
  const wrap=node('div','david-ci-table-wrap');wrap.setAttribute('role','region');
  wrap.setAttribute('aria-label','Таблица с разговори');wrap.tabIndex=0;
  const table=node('table','david-ci-table');const thead=node('thead'),headers=node('tr');
- for(const label of ['Дата и час','Фирма / клиент','Продължителност','Статус','Детайли']){
+ for(const label of ['Дата и час','Фирма / клиент','Продължителност','Статус']){
   const th=node('th','',label);th.scope='col';headers.append(th);
  }
  thead.append(headers);const tbody=node('tbody');table.append(thead,tbody);wrap.append(table);panel.append(wrap);
  const empty=node('p','muted','Зареждане на реалните записи...');panel.append(empty);
  heading.insertAdjacentElement('afterend',panel);
  let fetching=false;
- const openRecord=(s,button)=>openCall(s.call_sid,button,null,false);
- const load=async()=>{
+  const load=async()=>{
   if(fetching)return;fetching=true;refresh.disabled=true;
   try{
    const data=await callApi('call-records');
@@ -213,10 +212,8 @@ function mountCallRecords(root){
     const ms=s.started_at&&s.ended_at?Math.max(0,Date.parse(s.ended_at)-Date.parse(s.started_at)):null;
     tr.append(node('td','',Number.isFinite(ms)?formatAudioClock(ms):'—'));
     tr.append(node('td','',s.state||'—'));
-    const action=node('td','');const button=node('button','btn subtle','👁 Отвори');
-    button.type='button';button.addEventListener('click',event=>{event.stopPropagation();openRecord(s,button)});
-    action.append(button);tr.append(action);
-    tr.addEventListener('click',()=>openRecord(s,button));tbody.append(tr);
+    // Read-only operator history. No details popup and no recording access here.
+    tbody.append(tr);
    }
   }catch(error){tbody.replaceChildren();table.hidden=true;empty.hidden=false;empty.textContent='Записите не могат да се заредят: '+error.message}
   finally{fetching=false;refresh.disabled=false;}
@@ -313,7 +310,7 @@ css.textContent=`
 .david-ci-table{width:100%;min-width:650px;border-collapse:collapse;background:#fff;font-size:13px}
 .david-ci-table th,.david-ci-table td{text-align:left;padding:13px 14px;border-bottom:1px solid #e5edf7}
 .david-ci-table th{background:#eef5ff;font-weight:750;color:#173b60;white-space:nowrap}
-.david-ci-table-row{cursor:pointer}.david-ci-table-row:hover,.david-ci-table-row:focus-within{background:#f1f8ff}
+.david-ci-table-row{cursor:default}
 .david-ci-table tr:last-child td{border-bottom:0}
 .david-ci-table-secondary{display:block;color:#617b94;font-size:11px;margin-top:4px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
