@@ -50,12 +50,12 @@ test('Live status is scoped to the current operator, even when the account is an
  assert.match(api,/reason:'no_active_call'/);
  assert.match(api,/\.gte\('started_at',new Date\(Date\.now\(\)-20\*60\*1000\)\.toISOString\(\)\)/);
 });
-test('No-call screen links to the real Free Call dialer and checks Twilio/task approval',()=>{
- assert.match(ui,/#deskCallStart/);
- assert.match(ui,/Провери Twilio и задача/);
- assert.match(ui,/task-preflight/);
- assert.match(ui,/approved_task_missing/);
- assert.match(ui,/Не може да се набере още/);
+test('No-call captions remain functional without redundant dialer/preflight banner',()=>{
+ assert.doesNotMatch(ui,/david-ci-start-help/);
+ assert.doesNotMatch(ui,/Провери Twilio и задача/);
+ assert.doesNotMatch(ui,/#deskCallStart/);
+ assert.match(ui,/Няма активно Twilio обаждане/);
+ assert.match(ui,/Live Captions · Двата гласа/);
  assert.match(ui,/lastCaptionSignature='missing_stt'/);
 });
 
