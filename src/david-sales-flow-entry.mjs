@@ -509,7 +509,8 @@ function createAdminAudioPanel(call){
  const heading=el('div','sf-admin-audio-heading');
  heading.append(
   el('strong','',call.has_audio?'🎧 Чуй целия съхранен аудиозапис':'🎧 Аудиозапис · Няма файл'),
-  el('small','',call.has_audio?'Отвори за Play / Pause, пълна времева линия и свободно превъртане':'Файлът се появява само след успешно завършено качване')
+  el('small','',call.has_audio?'Отвори за Play / Pause, пълна времева линия и свободно превъртане':'Файлът се появява само след успешно завършено качване'),
+  el('small','sf-admin-actual-call-clock','⏱ Реален разговор: '+elapsed(call.duration_seconds))
  );
  summary.append(heading,el('span','sf-admin-audio-chevron','⌄'));
  panel.append(summary);
@@ -523,11 +524,22 @@ function createAdminAudioPanel(call){
  const player=el('audio','sf-admin-private-audio');
  player.controls=true;player.preload='auto';player.hidden=true;
  player.setAttribute('aria-label','Цял съхранен аудиозапис: '+(call.worker_name||'оператор')+' към '+(call.company?.company_name||'клиент'));
+ const actualCallTime=el('p','sf-admin-actual-call-duration','⏱ Продължителност на реалния разговор: '+elapsed(call.duration_seconds));
+ const playbackClock=el('p','sf-admin-playback-clock','🎧 Аудио: 00:00 / --:--');
+ playbackClock.setAttribute('aria-live','off');
  const durationDetails=el('p','sf-admin-audio-message','');
  const reload=el('button','btn subtle sf-admin-audio-refresh','↻ Зареди целия файл отново');
  reload.type='button';
  let loading=false,objectUrl=null,lastMeasuredDurationMs=null;
  const callDurationMs=Number.isFinite(call.duration_seconds)?Math.round(call.duration_seconds*1000):null;
+ // Actual call duration and playable audio duration are different facts.
+ // A legacy WebM can lack duration metadata or begin after recording consent.
+ function updatePlaybackClock(){
+  const current=Number.isFinite(player.currentTime)&&player.currentTime>=0?elapsed(player.currentTime):'00:00';
+  const audioMs=Number.isFinite(player.duration)&&player.duration>0?player.duration*1000:
+   (Number.isFinite(lastMeasuredDurationMs)&&lastMeasuredDurationMs>0?lastMeasuredDurationMs:null);
+  playbackClock.textContent='🎧 Аудио: '+current+' / '+(audioMs?formatAudioClock(audioMs):'--:--');
+ }
  function durationDescription(ms){
   const durationMs=Number.isFinite(ms)&&ms>0?ms:Number(call.recording_duration_ms)||null;
   const details=durationMs?'Звук във файла: '+formatAudioClock(durationMs):'Продължителността на звука не може да се измери';
@@ -539,7 +551,7 @@ function createAdminAudioPanel(call){
  const dispose=()=>{
   player.pause();player.removeAttribute('src');player.load();
   if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
-  player.hidden=true;lastMeasuredDurationMs=null;
+  player.hidden=true;lastMeasuredDurationMs=null;updatePlaybackClock();
  };
  async function load(){
   if(loading||!panel.open||!panel.isConnected)return;
@@ -568,6 +580,7 @@ function createAdminAudioPanel(call){
    lastMeasuredDurationMs=prepared.durationMs||Number(call.recording_duration_ms)||null;
    objectUrl=URL.createObjectURL(prepared.blob);
    player.src=objectUrl;player.hidden=false;player.load();
+   updatePlaybackClock();
    durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
    info.textContent='✓ Целият съхранен файл е зареден ('+(prepared.blob.size/1048576).toFixed(2)+' MB). Натисни ▶ Play, за да го чуеш от начало до край.';
    try{await api(endp('admin-mark-read'),'POST',{call_sid:call.call_sid,kind:'audio'})}catch{}
@@ -585,12 +598,16 @@ function createAdminAudioPanel(call){
    lastMeasuredDurationMs=player.duration*1000;
    durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
   }
+  updatePlaybackClock();
  });
+ for(const eventName of ['durationchange','timeupdate','seeked','ended','loadeddata']){
+  player.addEventListener(eventName,updatePlaybackClock);
+ }
  player.addEventListener('error',()=>{
   if(panel.open&&!player.hidden)info.textContent='Неуспешно възпроизвеждане. Избери „Зареди целия файл отново“.';
  });
  reload.addEventListener('click',load);
- content.append(player,durationDetails,reload);
+ content.append(actualCallTime,player,playbackClock,durationDetails,reload);
  return panel;
 }
 
@@ -760,7 +777,7 @@ css.textContent=`
 .sf-sales-choice.selected{background:#176fff!important;color:white!important;border-color:#176fff}
 .sf-sales-outcome label{display:block;font-weight:600;margin-bottom:12px}
 .sf-sales-outcome textarea{display:block;min-height:110px;margin-top:8px}
-.sf-sales-items{display:grid;gap:12px;margin-top:14px}\n.sf-admin-private-audio{width:100%;margin-top:12px}
+.sf-sales-items{display:grid;gap:12px;margin-top:14px}\n.sf-admin-private-audio{width:100%;margin-top:12px}\n.sf-admin-actual-call-clock{font-weight:700!important;color:#136a5f!important}\n.sf-admin-actual-call-duration{font-size:15px;font-weight:750;color:#144f61;margin:12px 0 5px}\n.sf-admin-playback-clock{font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:#193d5c;margin:7px 0 5px}
 .sf-admin-call-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 4px}
 .sf-admin-call-filters input[type=search]{flex:1 1 300px;min-width:180px}
 .sf-admin-audio-filter{display:flex;align-items:center;gap:6px;color:#29446b;font-size:14px}
