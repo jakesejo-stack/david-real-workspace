@@ -91,7 +91,7 @@ test('Audio recording still requires distinct affirmative permission',()=>{
 });
 
 test('operator always sees live caption controls before transcript while idle',()=>{
- assert.match(ui,/panel.append\(meta,permissions,customer,operator,captionHead,captions/);
+ assert.match(ui,/panel.append\(meta,permissions,micPreview\.view,customer,operator,captionHead,captions/);
  assert.match(ui,/\.david-ci-captions\.is-idle\{height:112px\}/);
  assert.match(ui,/Първо започни обаждане от телефонния панел/);
  assert.match(ui,/dial\.scrollIntoView/);
