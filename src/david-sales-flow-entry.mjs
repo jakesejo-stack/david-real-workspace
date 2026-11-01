@@ -31,10 +31,10 @@ const preflightDescriptions={
  trial_destination_not_verified:'Twilio Trial изисква потвърден номер на Митко',
  approved_task_missing:'Няма одобрена задача или разрешен номер за днес',
  live_calls_disabled:'Реалните разговори са изключени в DAVID',
- daily_attempt_already_used:'Тестовото обаждане за днес вече е използвано'
+ daily_attempt_already_used:'Дневният лимит на одобрените обаждания е изчерпан'
 };
 const preflightMessage=s=>{
- if(s.ready)return '✓ Twilio потвърди акаунта, приложението, Caller ID и днешната задача. Готово за тест.';
+ if(s.ready)return '✓ Twilio потвърди акаунта, приложението, Caller ID и днешната задача. Готово за реално обаждане.';
  const errors=(s.errors||[]).map(k=>preflightDescriptions[k]||k);
  return 'Twilio проверка: '+(errors.length?errors.join(' · '):'Невъзможно потвърждение');
 };
@@ -71,7 +71,7 @@ async function startApprovedCall(status){
    }}));
   };
   call.on('ringing',()=>{activeCallStatus='☎ Звъни...';status(activeCallStatus)});
-  call.on('accept',()=>{activeCallStatus='● Свързано. Поискай съгласие и натисни ⏺ Запис, за да запишеш всичко до Call ended.';status(activeCallStatus)});
+  call.on('accept',()=>{activeCallStatus='● Свързано. След изрично съгласие включи Live Captions (транскрипция). Аудиозаписът е отделна функция.';status(activeCallStatus)});
   call.on('disconnect',finish);call.on('cancel',finish);call.on('reject',finish);
   call.on('error',err=>{activeCallStatus='Twilio: '+String(err?.message||'Грешка');status(activeCallStatus);finish()});
   activeCallStatus='☎ Набиране на '+task.dialTo;status(activeCallStatus);
@@ -79,7 +79,7 @@ async function startApprovedCall(status){
   const hints={
    twilio_task_configuration_incomplete:'Twilio е изключен или липсват сървърни ключове. Свържете администратора.',
    no_approved_dial_target:'Няма одобрена задача с разрешен телефонен номер за днес.',
-   daily_call_already_attempted:'За днешната задача вече има направен опит за обаждане.',
+   daily_call_already_attempted:'Дневният лимит на одобрените обаждания е изчерпан.',
    limit_check_unavailable:'Не може да се потвърди лимитът за обаждания. Не набираме.'
   };
   activeCallStatus='Неуспешно обаждане: '+(hints[String(error?.message||'')]||String(error?.message||error));
