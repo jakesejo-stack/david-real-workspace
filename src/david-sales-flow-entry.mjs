@@ -2,7 +2,7 @@
 // Every list is filled only from authenticated, real server records. No fake call or audio content.
 import {createClient} from '@supabase/supabase-js';
 import {Device} from '@twilio/voice-sdk';
-import {finalizeBrowserAudio,preparePlaybackBlob,formatAudioClock} from './david-audio-completeness.mjs';
+import {finalizeBrowserAudio,formatAudioClock} from './david-audio-completeness.mjs';
 let client,config;
 let callingDevice=null,callingCall=null,connecting=false;
 let activeCallStatus='';
@@ -503,113 +503,6 @@ const elapsed=seconds=>{
  return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
 };
 
-function createAdminAudioPanel(call){
- const panel=el('details','sf-admin-audio-panel');
- const summary=el('summary','sf-admin-audio-toggle');
- const heading=el('div','sf-admin-audio-heading');
- heading.append(
-  el('strong','',call.has_audio?'🎧 Чуй целия съхранен аудиозапис':'🎧 Аудиозапис · Няма файл'),
-  el('small','',call.has_audio?'Отвори за Play / Pause, пълна времева линия и свободно превъртане':'Файлът се появява само след успешно завършено качване'),
-  el('small','sf-admin-actual-call-clock','⏱ Реален разговор: '+elapsed(call.duration_seconds))
- );
- summary.append(heading,el('span','sf-admin-audio-chevron','⌄'));
- panel.append(summary);
- const content=el('div','sf-admin-audio-content');
- const info=el('p','sf-admin-audio-message',call.has_audio?
-  'Разгъни, за да изтеглим целия файл в защитената администраторска сесия.':
-  call.recording_status==='pending'?'Аудиото се качва. Обнови след потвърждение.':
-  'Няма потвърден аудиозапис за този разговор.');
- content.append(info);panel.append(content);
- if(!call.has_audio)return panel;
- const player=el('audio','sf-admin-private-audio');
- player.controls=true;player.preload='auto';player.hidden=true;
- player.setAttribute('aria-label','Цял съхранен аудиозапис: '+(call.worker_name||'оператор')+' към '+(call.company?.company_name||'клиент'));
- const actualCallTime=el('p','sf-admin-actual-call-duration','⏱ Продължителност на реалния разговор: '+elapsed(call.duration_seconds));
- const playbackClock=el('p','sf-admin-playback-clock','🎧 Аудио: 00:00 / --:--');
- playbackClock.setAttribute('aria-live','off');
- const durationDetails=el('p','sf-admin-audio-message','');
- const reload=el('button','btn subtle sf-admin-audio-refresh','↻ Зареди целия файл отново');
- reload.type='button';
- let loading=false,objectUrl=null,lastMeasuredDurationMs=null;
- const callDurationMs=Number.isFinite(call.duration_seconds)?Math.round(call.duration_seconds*1000):null;
- // Actual call duration and playable audio duration are different facts.
- // A legacy WebM can lack duration metadata or begin after recording consent.
- function updatePlaybackClock(){
-  const current=Number.isFinite(player.currentTime)&&player.currentTime>=0?elapsed(player.currentTime):'00:00';
-  const audioMs=Number.isFinite(player.duration)&&player.duration>0?player.duration*1000:
-   (Number.isFinite(lastMeasuredDurationMs)&&lastMeasuredDurationMs>0?lastMeasuredDurationMs:null);
-  playbackClock.textContent='🎧 Аудио: '+current+' / '+(audioMs?formatAudioClock(audioMs):'--:--');
- }
- function durationDescription(ms){
-  const durationMs=Number.isFinite(ms)&&ms>0?ms:Number(call.recording_duration_ms)||null;
-  const details=durationMs?'Звук във файла: '+formatAudioClock(durationMs):'Продължителността на звука не може да се измери';
-  const callInfo=callDurationMs?' · Телефонна сесия: '+formatAudioClock(callDurationMs):'';
-  const partial=call.recording_end_reason==='manual_stop'||call.recording_end_reason==='limit'||
-   (durationMs&&callDurationMs&&durationMs+8000<callDurationMs);
-  return details+callInfo+(partial?' · Частичен запис. Звук преди натискане на Запис не съществува във файла.':'');
- }
- const dispose=()=>{
-  player.pause();player.removeAttribute('src');player.load();
-  if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
-  player.hidden=true;lastMeasuredDurationMs=null;updatePlaybackClock();
- };
- async function load(){
-  if(loading||!panel.open||!panel.isConnected)return;
-  loading=true;reload.disabled=true;
-  info.textContent='🔒 Проверявам администраторския достъп и зареждам ЦЕЛИЯ аудиофайл...';
-  try{
-   let fileBlob;
-   if(call.browser_recording_id){
-    const data=await api(endp('browser-record-link')+'?recording_id='+encodeURIComponent(call.browser_recording_id));
-    if(!data?.url||!/^https:\/\//.test(data.url))throw Error('Няма валиден защитен аудиолинк');
-    // Resolve the time-limited signed URL NOW, then retain all audio bytes in a
-    // local Blob URL. A 60-second link expiry cannot truncate long playback.
-    const response=await fetch(data.url,{cache:'no-store'});
-    if(!response.ok)throw Error('Зареждане на защитения файл: '+response.status);
-    fileBlob=await response.blob();
-   }else if(call.provider_recording_sid){
-    const token=await jwt();
-    const url=endp('live-audio')+'?sid='+encodeURIComponent(call.call_sid)+'&recording_sid='+encodeURIComponent(call.provider_recording_sid);
-    const response=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-    if(!response.ok)throw Error('Няма достъп до записа');
-    fileBlob=await response.blob();
-   }else throw Error('Няма съхранен аудиофайл');
-   const prepared=await preparePlaybackBlob(fileBlob);
-   if(!panel.open||!panel.isConnected)return;
-   dispose();
-   lastMeasuredDurationMs=prepared.durationMs||Number(call.recording_duration_ms)||null;
-   objectUrl=URL.createObjectURL(prepared.blob);
-   player.src=objectUrl;player.hidden=false;player.load();
-   updatePlaybackClock();
-   durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
-   info.textContent='✓ Целият съхранен файл е зареден ('+(prepared.blob.size/1048576).toFixed(2)+' MB). Натисни ▶ Play, за да го чуеш от начало до край.';
-   try{await api(endp('admin-mark-read'),'POST',{call_sid:call.call_sid,kind:'audio'})}catch{}
-  }catch(error){
-   dispose();
-   info.textContent='Неуспешно зареждане: '+error.message+'. Натисни „Зареди целия файл отново“.';
-  }finally{loading=false;reload.disabled=false}
- }
- panel.addEventListener('toggle',()=>{
-  if(panel.open)load();
-  else{if(!loading)dispose();info.textContent='Разгъни, за да чуеш целия файл.'}
- });
- player.addEventListener('loadedmetadata',()=>{
-  if(Number.isFinite(player.duration)&&player.duration>0){
-   lastMeasuredDurationMs=player.duration*1000;
-   durationDetails.textContent=durationDescription(lastMeasuredDurationMs);
-  }
-  updatePlaybackClock();
- });
- for(const eventName of ['durationchange','timeupdate','seeked','ended','loadeddata']){
-  player.addEventListener(eventName,updatePlaybackClock);
- }
- player.addEventListener('error',()=>{
-  if(panel.open&&!player.hidden)info.textContent='Неуспешно възпроизвеждане. Избери „Зареди целия файл отново“.';
- });
- reload.addEventListener('click',load);
- content.append(actualCallTime,player,playbackClock,durationDetails,reload);
- return panel;
-}
 
 function mountAdmin(root){
  const title=[...root.querySelectorAll('.main h1,.main h2')].find(h=>h.textContent?.trim()==='Admin Panel');
@@ -618,9 +511,9 @@ function mountAdmin(root){
  const section=el('section','card sf-admin-call-inbox');section.id='sf-admin-call-inbox';
  const header=el('div','sf-sales-header');header.append(el('h2','','☎ DAVID · Admin Call Records'));
  const counters=el('strong','','Общо: 0 · Аудио: 0 · Нови: 0');
- const refresh=el('button','btn subtle','↻ Обнови');
+ const refresh=el('button','btn subtle','↻ Обнови');refresh.type='button';
  header.append(counters,refresh);section.append(header);
- section.append(el('p','muted','За администратори: оператор, клиент, точен час, продължителност, запис, транскрипция и бележки. Аудиото се съхранява в частно хранилище.'));
+ section.append(el('p','muted','Всички разговори в една таблица. Натисни ред за подробности, транскрипция, бележки и защитен аудиоплейър.'));
  const tools=el('div','sf-admin-call-filters');
  const search=el('input','field');search.type='search';
  search.placeholder='Търси оператор, Gmail, телефон, фирма или бележка';
@@ -629,85 +522,77 @@ function mountAdmin(root){
  const onlyAudio=el('input');onlyAudio.type='checkbox';
  audioFilter.append(onlyAudio,document.createTextNode(' Само със запис'));
  tools.append(search,audioFilter);section.append(tools);
- const list=el('div','sf-sales-items');section.append(list);
+ const wrap=el('div','sf-admin-call-table-wrap');
+ wrap.setAttribute('role','region');wrap.setAttribute('aria-label','Таблица с реалните разговори на DAVID');
+ wrap.tabIndex=0;
+ const table=el('table','sf-admin-call-table');
+ const caption=el('caption','sf-admin-call-table-caption','История на разговорите в DAVID');
+ table.append(caption);
+ const thead=el('thead');
+ const headings=el('tr');
+ for(const name of ['Дата и час','Оператор','Клиент / фирма','Разговор','Аудио','Резултат','Статус','Действие']){
+  const th=el('th','',name);th.scope='col';headings.append(th);
+ }
+ thead.append(headings);
+ const tbody=el('tbody');table.append(thead,tbody);wrap.append(table);section.append(wrap);
+ const empty=el('p','muted sf-admin-table-empty','Все още няма реални разговори.');empty.hidden=true;section.append(empty);
  title.insertAdjacentElement('afterend',section);
  let loading=false,latest=[],lastFetch=0;
- function addText(parent,tag,cls,value){parent.append(el(tag,cls,value||'—'))}
+ function openDetails(call,trigger){
+  if(!/^CA[0-9a-f]{32}$/i.test(String(call.call_sid||'')))return;
+  // The shared DAVID modal fetches the authoritative record and admin-only audio.
+  // Never send stored audio URLs, tokens or file bytes through a UI event.
+  document.dispatchEvent(new CustomEvent('david:open-call',{detail:{
+   sid:call.call_sid,trigger,autoLoadAudio:!!call.has_audio,
+   overview:{
+    worker_name:call.worker_name||'Оператор',
+    worker_email:call.worker_email||'',
+    dialed_number:call.dialed_number||'',
+    duration_seconds:call.duration_seconds,
+    call_provider_status:call.call_provider_status||''
+   }
+  }}));
+ }
+ function rowCell(row,label,text,className=''){
+  const td=el('td',className,text);td.setAttribute('data-label',label);row.append(td);return td;
+ }
  function render(){
   if(!section.isConnected)return;
   const term=search.value.trim().toLocaleLowerCase('bg-BG');
   const filtered=latest.filter(c=>{
    if(onlyAudio.checked&&!c.has_audio)return false;
    const searchable=[c.worker_name,c.worker_email,c.company?.company_name,c.company?.contact_name,
-    c.dialed_number,c.outcome?.notes,c.outcome?.disposition].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
+    c.dialed_number,c.outcome?.notes,c.outcome?.disposition,c.state].filter(Boolean).join(' ').toLocaleLowerCase('bg-BG');
    return !term||searchable.includes(term);
   });
-  for(const oldPlayer of list.querySelectorAll('audio.sf-admin-private-audio')){
-   oldPlayer.pause();
-   if(oldPlayer.src.startsWith('blob:'))URL.revokeObjectURL(oldPlayer.src);
-  }
-  list.replaceChildren();
-  if(!filtered.length){
-   list.append(el('p','muted',latest.length?'Няма разговори по този филтър.':'Все още няма реални разговори.'));
-   return;
-  }
+  tbody.replaceChildren();
+  empty.hidden=filtered.length>0;
+  empty.textContent=latest.length?'Няма разговори по този филтър.':'Все още няма реални разговори.';
+  table.hidden=filtered.length===0;
   for(const c of filtered){
-   const card=el('article','sf-sales-item sf-admin-audit-card');
-   const top=el('div','sf-admin-audit-heading');
-   const identity=el('div','sf-admin-identity');
-   addText(identity,'strong','',c.worker_name||'Оператор');
-   addText(identity,'small','muted',c.worker_email||'Проверен профил · '+String(c.worker_user_id||'').slice(0,8));
-   top.append(identity,el('span','sf-admin-call-state',c.state||'неизвестен статус'));
-   card.append(top);
-   addText(card,'h3','sf-admin-company',c.company?.company_name||'Няма фирма');
-   const fields=el('div','sf-admin-call-facts');
-   for(const [name,value] of [
-    ['Клиент / телефон',[c.company?.contact_name,c.dialed_number].filter(Boolean).join(' · ')||'—'],
-    ['Начало',exactTime(c.started_at)],
-    ['Край',exactTime(c.ended_at)],
-    ['Продължителност',elapsed(c.duration_seconds)],
-    ['Резултат',statusLabels[c.outcome?.disposition]|| (c.outcome?'Друг':'Няма запазен резултат')]
-   ]){
-    const field=el('div','sf-admin-call-fact');
-    field.append(el('span','muted',name),el('strong','',value));fields.append(field);
-   }
-   card.append(fields);
-   if(c.outcome?.notes){
-    const notes=el('div','sf-admin-outcome-note');
-    notes.append(el('strong','','Бележка от оператора'),el('p','',c.outcome.notes));card.append(notes);
-   }else card.append(el('p','muted','Все още няма бележка към този разговор.'));
-   const recording=el('div','sf-admin-recording-status');
-   const recStatus=c.has_audio?'✓ Записът е съхранен':c.recording_status==='pending'?
-    '◉ Аудиото се качва / очаква потвърждение':c.recording_status==='failed'?
-    '⚠ Неуспешен запис':'— Няма аудиозапис';
-   recording.append(el('strong','',recStatus));
-   if(c.has_audio){
-    const mb=Number(c.recording_bytes)>0?' · '+(c.recording_bytes/1024/1024).toFixed(2)+' MB':'';
-    recording.append(el('small','muted',' · '+exactTime(c.recording_completed_at||c.recording_started_at)+mb));
-   }else if(c.recording_consent){
-    recording.append(el('small','muted',' · Има регистрирано съгласие, но няма потвърден файл.'));
-   }
-   card.append(recording,createAdminAudioPanel(c));
-   if(c.transcript_preview?.length){
-    const transcript=el('div','sf-admin-transcript-preview');
-    transcript.append(el('strong','','Последни реплики (транскрипция)'));
-    for(const line of c.transcript_preview){
-     const prefix=line.speaker==='client'?'Клиент: ':'Оператор: ';
-     transcript.append(el('p','',prefix+line.content));
-    }
-    card.append(transcript);
-   }else card.append(el('p','muted','Няма налична транскрипция за този разговор.'));
-   const row=el('div','sf-sales-row sf-admin-call-buttons');
-   const chat=el('button','btn subtle',c.new_chat?'● Нов чат':'💬 Пълен разговор');
-   chat.type='button';chat.disabled=!c.has_chat;
-   if(!c.has_chat)chat.textContent='💬 Няма транскрипция';
-   chat.addEventListener('click',async()=>{
-    openTranscript(c.call_sid,chat);
-    try{await api(endp('admin-mark-read'),'POST',{call_sid:c.call_sid,kind:'chat'})}catch{}
-   });
-   row.append(chat);
-   card.append(row);
-   list.append(card);
+   const tr=el('tr','sf-admin-call-table-row');
+   const started=rowCell(tr,'Дата и час',exactTime(c.started_at),'sf-admin-table-date');
+   if(c.ended_at)started.title='Край: '+exactTime(c.ended_at);
+   const worker=rowCell(tr,'Оператор',c.worker_name||'Оператор');
+   worker.append(el('small','sf-admin-table-secondary',c.worker_email||'Проверен профил'));
+   const company=rowCell(tr,'Клиент / фирма',c.company?.company_name||'Фирма не е посочена');
+   company.append(el('small','sf-admin-table-secondary',
+    [c.company?.contact_name,c.dialed_number].filter(Boolean).join(' · ')||'—'));
+   rowCell(tr,'Разговор',elapsed(c.duration_seconds),'sf-admin-table-duration');
+   const audio=rowCell(tr,'Аудио',c.has_audio?'🎧 Запис':'— Няма файл',
+    c.has_audio?'sf-admin-table-audio-ready':'sf-admin-table-muted');
+   if(c.new_audio)audio.append(el('small','sf-admin-table-secondary','● Нов запис'));
+   rowCell(tr,'Резултат',statusLabels[c.outcome?.disposition]||
+    (c.outcome?'Друг':'Не е записан'));
+   rowCell(tr,'Статус',c.state||'—','sf-admin-table-status');
+   const actionCell=rowCell(tr,'Действие','');
+   const button=el('button','btn subtle sf-admin-table-open',c.has_audio?'🎧 Отвори':'👁 Детайли');
+   button.type='button';
+   button.setAttribute('aria-label','Отвори разговора с '+(c.company?.contact_name||c.company?.company_name||'клиента'));
+   actionCell.append(button);
+   button.addEventListener('click',event=>{event.stopPropagation();openDetails(c,button)});
+   tr.addEventListener('click',()=>openDetails(c,button));
+   tbody.append(tr);
   }
  }
  async function load(){
@@ -718,10 +603,11 @@ function mountAdmin(root){
    latest=Array.isArray(data.calls)?data.calls:[];
    counters.textContent='Общо: '+(data.total||0)+' · Аудио: '+(data.audio_ready||0)+
     ' · Нови аудио: '+(data.unread_audio||0)+' · Нови чатове: '+(data.unread_chat||0);
-   lastFetch=Date.now();
-   render();
-  }catch(error){list.replaceChildren(el('p','muted','Административната история не се зареди: '+error.message))}
-  finally{loading=false;refresh.disabled=false}
+   lastFetch=Date.now();render();
+  }catch(error){
+   tbody.replaceChildren();table.hidden=true;empty.hidden=false;
+   empty.textContent='Административната история не се зареди: '+error.message;
+  }finally{loading=false;refresh.disabled=false}
  }
  search.addEventListener('input',render);
  onlyAudio.addEventListener('change',render);
@@ -730,7 +616,8 @@ function mountAdmin(root){
  const timer=setInterval(()=>{
   if(!section.isConnected){clearInterval(timer);return}
   if(document.visibilityState!=='visible'||section.offsetParent===null||loading)return;
-  if(list.querySelector('details.sf-admin-audio-panel[open]'))return; // Keep the expanded player mounted while listening.
+  // Keep the popup/player alive and seekable while an administrator listens.
+  if(document.getElementById('david-call-modal')?.style.display==='flex')return;
   if(Date.now()-lastFetch>12000)load();
  },4500);
 }
@@ -777,7 +664,26 @@ css.textContent=`
 .sf-sales-choice.selected{background:#176fff!important;color:white!important;border-color:#176fff}
 .sf-sales-outcome label{display:block;font-weight:600;margin-bottom:12px}
 .sf-sales-outcome textarea{display:block;min-height:110px;margin-top:8px}
-.sf-sales-items{display:grid;gap:12px;margin-top:14px}\n.sf-admin-private-audio{width:100%;margin-top:12px}\n.sf-admin-actual-call-clock{font-weight:700!important;color:#136a5f!important}\n.sf-admin-actual-call-duration{font-size:15px;font-weight:750;color:#144f61;margin:12px 0 5px}\n.sf-admin-playback-clock{font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:#193d5c;margin:7px 0 5px}
+.sf-sales-items{display:grid;gap:12px;margin-top:14px}
+.sf-admin-call-inbox{min-width:0}
+.sf-admin-call-table-wrap{margin:14px 0 0;max-width:100%;overflow-x:auto;border:1px solid #dce7f4;border-radius:14px}
+.sf-admin-call-table{width:100%;min-width:960px;border-collapse:collapse;font-size:13px;text-align:left;background:#fff}
+.sf-admin-call-table-caption{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.sf-admin-call-table thead{background:#edf4ff}
+.sf-admin-call-table th{padding:14px 12px;font-weight:750;color:#18395d;white-space:nowrap;position:sticky;top:0;z-index:1;border-bottom:1px solid #dbe6f4}
+.sf-admin-call-table td{padding:15px 12px;vertical-align:middle;border-bottom:1px solid #e7edf6;color:#153454;line-height:1.45}
+.sf-admin-call-table-row{cursor:pointer;transition:background .12s ease}
+.sf-admin-call-table-row:hover,.sf-admin-call-table-row:focus-within{background:#f2f8ff}
+.sf-admin-call-table tbody tr:last-child td{border-bottom:0}
+.sf-admin-table-secondary{display:block;color:#667f99;font-size:11px;margin-top:3px;font-weight:450;overflow-wrap:anywhere}
+.sf-admin-table-date{white-space:nowrap;font-variant-numeric:tabular-nums}
+.sf-admin-table-duration{font-weight:750;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sf-admin-table-audio-ready{color:#08775e!important;font-weight:750}
+.sf-admin-table-muted{color:#74869b!important}
+.sf-admin-table-status{font-size:12px;font-weight:650}
+.sf-admin-table-open{white-space:nowrap;font-weight:700}
+.sf-admin-table-empty{padding:18px}
+\n.sf-admin-private-audio{width:100%;margin-top:12px}\n.sf-admin-actual-call-clock{font-weight:700!important;color:#136a5f!important}\n.sf-admin-actual-call-duration{font-size:15px;font-weight:750;color:#144f61;margin:12px 0 5px}\n.sf-admin-playback-clock{font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:#193d5c;margin:7px 0 5px}
 .sf-admin-call-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 4px}
 .sf-admin-call-filters input[type=search]{flex:1 1 300px;min-width:180px}
 .sf-admin-audio-filter{display:flex;align-items:center;gap:6px;color:#29446b;font-size:14px}
