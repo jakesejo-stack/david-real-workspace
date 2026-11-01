@@ -232,9 +232,9 @@ function mountDesk(root){
  const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
  const captionHead=node('div','david-ci-captions-head');
  captionHead.append(node('h3','','Live Captions · Двата гласа'));
- const captionState=node('span','tag gray','● Чака разрешение');
+ const captionState=node('span','tag gray','○ Изчаква обаждане');
  captionHead.append(captionState);
- const captions=node('div','david-ci-captions');
+ const captions=node('div','david-ci-captions is-idle');
  captions.setAttribute('role','log');captions.setAttribute('aria-label','Живи надписи от разговора');
  captions.setAttribute('aria-live','polite');captions.setAttribute('aria-relevant','additions');
  captions.append(node('p','muted','Надписите ще се появят след реално Twilio обаждане и разрешено транскрибиране.'));
@@ -246,7 +246,7 @@ function mountDesk(root){
  for(const [code,label] of [['bg-BG','Български'],['en-US','English'],['es-ES','Español'],['de-DE','Deutsch'],['fr-FR','Français']]){
   const opt=node('option','',label);opt.value=code;language.append(opt);
  }
- const listen=node('button','btn primary','▶ Live Captions');listen.disabled=true;
+ const listen=node('button','btn primary','▶ Live Captions');
  const record=node('button','btn subtle','● Запис (след разрешение)');record.disabled=true;
  listen.type='button';record.type='button';
  const actions=node('div','david-ci-consent-actions');actions.append(language,listen,record);
@@ -255,14 +255,14 @@ function mountDesk(root){
  stopTrans.type='button';stopRecording.type='button';stopTrans.hidden=true;stopRecording.hidden=true;
  actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
- permissions.append(notice,actions,result);
- panel.append(meta,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
+ permissions.append(actions,result,notice);
+ panel.append(meta,permissions,customer,operator,captionHead,captions,answer,adviceLabel);
  heading.insertAdjacentElement('afterend',panel);
- let busy=false, timer=null,callSid=null,lastCaptionSignature='';
+ let busy=false,timer=null,callSid=null,activationPending=false,lastCaptionSignature='';
  const renderCaptions=(lines,enabled)=>{
   if(!enabled){
    if(lastCaptionSignature!=='disabled'){
-    lastCaptionSignature='disabled';captions.replaceChildren(node('p','muted','Няма разрешена транскрипция. Live Captions са изключени.'));
+    lastCaptionSignature='disabled';captions.replaceChildren(node('p','muted',callSid?'Изчаквам да включиш Live Captions за текущия разговор.':'Надписите ще се появят след телефонно обаждане и включване на Live Captions.'));
    }
    return;
   }
@@ -289,12 +289,18 @@ function mountDesk(root){
  };
 
  const startMedia=async scope=>{
-  if(!callSid)return;
+  if(activationPending)return;
+  if(!callSid){
+   result.textContent='☎ Първо започни обаждане от телефонния панел, после натисни Live Captions.';
+   const dial=[...root.querySelectorAll('.sf-sales-phone-actions button')].find(b=>/Набери/.test(b.textContent||''));
+   if(dial){dial.scrollIntoView({behavior:'smooth',block:'center'});dial.focus({preventScroll:true})}
+   return;
+  }
   // Captions: one-click operator attestation of prior notice and assessed legal basis.
   // Audio recording: separate explicit agreement from the other party is mandatory.
   if(scope==='recording'&&!window.confirm('Клиентът изрично разреши ли аудиозаписването?'))return;
   const button=scope==='recording'?record:listen;
-  button.disabled=true;result.textContent=scope==='recording'?'Проверявам разрешението за аудиозапис...':'Стартирам Live Captions чрез Twilio...';
+  activationPending=true;button.disabled=true;result.textContent=scope==='recording'?'Проверявам разрешението за аудиозапис...':'Стартирам Live Captions чрез Twilio...';
   const attestation=scope==='transcription'?{noticeDelivered:true,lawfulBasisConfirmed:true}:{clientConfirmed:true};
   try{
    const out=await callApi('live-consent',{},{
@@ -302,8 +308,8 @@ function mountDesk(root){
     body:JSON.stringify({call_sid:callSid,scope,...attestation,noticeVersion:'david-v1',method:'verbal',language_code:language.value})
    });
    result.textContent=out.started?'✓ '+(scope==='recording'?'Аудиозаписът':'Live Captions')+' е стартиран.':'Twilio не потвърди стартиране.';
-  }catch(error){result.textContent='Не е активирано: '+error.message;}
-  finally{button.disabled=false;update();}
+  }catch(error){result.textContent='Не е активирано: '+(error.message==='twilio_call_not_connected'?'Изчакай другият човек да вдигне, после натисни отново.':error.message);}
+  finally{activationPending=false;button.disabled=false;update();}
  };
  listen.addEventListener('click',()=>startMedia('transcription'));
  record.addEventListener('click',()=>startMedia('recording'));
@@ -327,8 +333,9 @@ function mountDesk(root){
   try{
    const data=await callApi('live-status');
    if(!data.active){
-    callSid=null;listen.disabled=true;record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;
-    meta.textContent='Няма активно Twilio обаждане. Надписите не могат да започнат преди реален разговор.';
+    callSid=null;listen.disabled=activationPending;listen.textContent='▶ Live Captions';record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;
+    captions.classList.add('is-idle');
+    meta.textContent='Телефонът е свободен. Live Captions са готови за следващото обаждане.';
     customer.textContent='Клиент: —';operator.textContent='Оператор: —';
     answer.textContent='DAVID: Изчаквам да започне разговорът.';
     captionState.textContent='● Изчаква обаждане';captionState.className='tag gray';
@@ -336,7 +343,12 @@ function mountDesk(root){
     return;
    }
    callSid=data.call_sid;
-   listen.disabled=data.state!=='in-progress'||!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=data.state!=='in-progress'||!!data.recording_authorized||data.recording_feature_enabled===false;
+   captions.classList.toggle('is-idle',!data.transcription_active);
+   // The backend checks the real Twilio call before starting any paid transcription.
+   // DB state can lag while the other party answers; do not lock the UI on a stale state.
+   listen.disabled=activationPending||!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;
+   listen.textContent=data.transcription_active?'✓ Live Captions активни':data.transcription_stopped?'Live Captions са спрени':'▶ Live Captions';
+   record.disabled=data.state!=='in-progress'||!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Live Captions разрешени':' · Live Captions не са стартирани');
    const active=!!data.transcription_active;
@@ -393,6 +405,9 @@ css.textContent=`
 .david-ci-captions-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 8px}
 .david-ci-captions-head h3{margin:0}
 .david-ci-captions{height:260px;overflow-y:auto;overscroll-behavior:contain;background:#f7f9fc;border:1px solid #dbe5f2;border-radius:14px;padding:12px}
+.david-ci-captions.is-idle{height:112px}
+.david-ci-permissions{border-bottom:1px solid #e0e8f5;padding:12px 0 16px}
+.david-ci-permissions>p{margin:8px 0}
 .david-ci-caption-line{padding:10px 12px;background:#fff;border:1px solid #dbe5f2;border-radius:11px;margin:7px 0;overflow-wrap:anywhere}
 .david-ci-caption-line.client{border-left:4px solid #e6a44e}
 .david-ci-caption-line.operator{border-left:4px solid #307dd9}
