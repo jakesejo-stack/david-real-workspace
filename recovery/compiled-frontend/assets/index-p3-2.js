@@ -411,7 +411,7 @@ function davidManualDesk(){
  '<select class="field" disabled><option>Pending / Очакващ отговор</option></select>'+
  '<textarea class="field" rows="3" disabled placeholder="Бележки след потвърден Twilio разговор"></textarea>'+
  '<button class="btn primary" disabled>Запази резултата</button></div>'+
- (g.role==="worker"?'<div class="card" id="deskWorkerTask"><h2>📋 Задача за днес</h2><p class="muted">Зареждане…</p></div>':'')+
+ (["worker","admin"].includes(g.role)?'<div class="card" id="deskWorkerTask"><h2>📋 Задача за днес</h2><p class="muted">Зареждане…</p></div>':'')+
  '<div class="dock"><div><b>☎ Live Call Desk · Twilio</b><div class="tiny" id="deskDialHint">Реално набиране само към одобрен номер по днешната задача</div></div>'+
  '<div class="buttons"><button id="deskCallStart" class="btn green" type="button" '+(g.call||g.taskCallBusy?'disabled':'')+'>☎ Start Real Call</button><button id="deskCallEnd" class="btn red" type="button" '+(g.call?'':'disabled')+'>■ End Call</button></div></div>'+
  '<p class="tiny">Free Call означава разговор без фирмена резервация, не безплатен разговор. Twilio начислява такси след активиране. Обаждането е ограничено до одобрения номер по днешната задача.</p>';
@@ -462,7 +462,7 @@ async function davidStartTaskTwilio(){
 async function davidLoadDeskTask(){
  const node=N("deskWorkerTask");
  if(!node||!g.db||!g.user)return;
- if(g.role!=="worker"){node.innerHTML='<p class="muted">Изберете назначена и одобрена фирма в Company Info, ако ще извършвате реално изходящо обаждане.</p>';return}
+ if(!["worker","admin"].includes(g.role)){node.innerHTML='<p class="muted">Необходим е одобрен профил и дневна задача за обаждане.</p>';return}
  try{
   const {data,error}=await g.db.from("david_daily_worker_tasks")
    .select("title,instructions,call_script,target_calls,task_date")
