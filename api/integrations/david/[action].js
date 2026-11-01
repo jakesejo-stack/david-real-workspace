@@ -31,7 +31,9 @@ function dialReject(res,message){
  res.setHeader('Cache-Control','no-store');
  return res.status(200).send(t.toString());
 }
-export const dailyCallLimit=task=>Math.max(0,Math.min(2,Number(task?.target_calls)||0));
+// Enforce the admin-approved daily quota, capped to the existing DB constraint (1..5).
+// This never grants permission to call a number absent from the approved daily task and allowlist.
+export const dailyCallLimit=task=>Math.max(0,Math.min(5,Number(task?.target_calls)||0));
 async function taskWorker(db,userId){
  const [identity,member,task]=await Promise.all([
   db.from('david_worker_identities').select('active').eq('user_id',userId).maybeSingle(),
@@ -221,10 +223,17 @@ async function handleTaskStatus(req,res){
   if(!callSidPattern.test(sid))return response(res,400,{error:'bad_call_sid'});
   const status=String(req.body?.CallStatus||'unknown');
   if(!['queued','initiated','ringing','in-progress','completed','busy','failed','no-answer','canceled'].includes(status))return response(res,400,{error:'invalid_call_status'});
+  // The parent browser-to-Twilio call can end "completed" even if the
+  // destination <Dial> leg failed or was unanswered. The <Dial action>
+  // callback is authoritative and must not be overwritten here.
+  if(status==='completed')return response(res,200,{ok:true,parent_complete:true});
   const d=Number(req.body?.CallDuration);
   const patch={status,updated_at:new Date().toISOString()};
   if(Number.isInteger(d)&&d>=0&&d<=7200)patch.duration_seconds=d;
-  const {error}=await serviceClient().from('david_task_call_attempts').update(patch).eq('parent_call_sid',sid);
+  let q=serviceClient().from('david_task_call_attempts').update(patch).eq('parent_call_sid',sid);
+  // Progress callbacks can arrive out of order; never replace final leg results.
+  q=q.not('status','in','(completed,busy,failed,no-answer,canceled)');
+  const {error}=await q;
   return response(res,error?503:200,error?{error:'status_unavailable'}:{ok:true});
  }catch{return response(res,503,{error:'status_unavailable'})}
 }
