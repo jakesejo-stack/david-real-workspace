@@ -43,3 +43,18 @@ test('Live AI runs in human-only suggestion mode and never autonomously speaks',
  assert.match(api,/transcript_segment_id:segment\.id,suggestion:output/);
  assert.match(ui,/AI не говори по телефона/);
 });
+
+
+test('Live status is scoped to the current operator, even when the account is an admin',()=>{
+ assert.match(api,/\.eq\('worker_user_id',a\.user\.id\)/);
+ assert.match(api,/reason:'no_active_call'/);
+ assert.match(api,/\.gte\('started_at',new Date\(Date\.now\(\)-20\*60\*1000\)\.toISOString\(\)\)/);
+});
+test('No-call screen links to the real Free Call dialer and checks Twilio/task approval',()=>{
+ assert.match(ui,/#deskCallStart/);
+ assert.match(ui,/Провери Twilio и задача/);
+ assert.match(ui,/task-preflight/);
+ assert.match(ui,/approved_task_missing/);
+ assert.match(ui,/Не може да се набере още/);
+ assert.match(ui,/lastCaptionSignature='missing_stt'/);
+});
