@@ -8,9 +8,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
-    "twilio": "^5.10.0"
+    "twilio": "^5.10.0",
+    "@twilio/voice-sdk": "2.18.5",
+    "@fix-webm-duration/fix": "1.0.1"
   },
   "devDependencies": {
     "vite": "^7.1.0"
+  },
+  "overrides": {
+    "rollup": "4.67.2"
   }
 }
