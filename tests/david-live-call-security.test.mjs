@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {handleCallIntelligence,canAccessCallAudio} from '../src/server/david-live-calls.mjs';
-import davIdHandler from '../api/integrations/david/[action].js';
+import davIdHandler,{dailyCallLimit} from '../api/integrations/david/[action].js';
+import {readFileSync} from 'node:fs';
 
 function mockResponse(){
  return {
@@ -89,4 +90,19 @@ test('Conference action fails closed while feature disabled',async()=>{
   if(old===undefined)delete process.env.DAVID_CONFERENCE_CALLS_ENABLED;
   else process.env.DAVID_CONFERENCE_CALLS_ENABLED=old;
  }
+});
+
+test('real calls obey a maximum of five admin-approved attempts per day',()=>{
+ assert.equal(dailyCallLimit({target_calls:1}),1);
+ assert.equal(dailyCallLimit({target_calls:5}),5);
+ assert.equal(dailyCallLimit({target_calls:100}),5);
+ assert.equal(dailyCallLimit({target_calls:0}),0);
+});
+test('parent Twilio completion cannot overwrite final child customer status',()=>{
+ const source=readFileSync(new URL('../api/integrations/david/[action].js',import.meta.url),'utf8');
+ assert.match(source,/if\(status==='completed'\)return response\(res,200,\{ok:true,parent_complete:true\}\)/);
+ assert.match(source,/if\(!prior\.ended_at\)/);
+ assert.match(source,/const answered=conference\?prior\.state==='in-progress':raw==='completed'/);
+ assert.match(source,/\.is\('ended_at',null\)\.select\('call_sid'\)/);
+ assert.match(source,/q=q\.not\('status','in','\(completed,busy,failed,no-answer,canceled\)'\)/);
 });
