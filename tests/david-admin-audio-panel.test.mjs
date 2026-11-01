@@ -52,7 +52,27 @@ test('Private audio is always authorized on the server with temporary signed URL
  assert.match(api,/if\(a\.role!=='admin'\)return response\(res,403/);
 });
 
-test('Call Records history also uses a table that opens shared details popup',()=>{
- assert.match(detail,/node\('table','david-ci-table'\)/);
- assert.match(detail,/tr\.addEventListener\('click',\(\)=>openRecord\(s,button\)\)/);
+test('General Call Records is read-only without Open actions or audio links',()=>{
+ const start=detail.indexOf('function mountCallRecords(root){');
+ const end=detail.indexOf('\nfunction mountDesk(root){',start);
+ assert.ok(start>=0&&end>start);
+ const records=detail.slice(start,end);
+ assert.match(records,/node\('table','david-ci-table'\)/);
+ assert.match(records,/for\(const label of \['Дата и час','Фирма \/ клиент','Продължителност','Статус'\]\)/);
+ assert.doesNotMatch(records,/Отвори|openCall\(|openRecord\(|new CustomEvent\('david:open-call'|addEventListener\('click',[^\n]*open/);
+ assert.doesNotMatch(records,/tr\.addEventListener\('click'/);
+ assert.doesNotMatch(records,/node\('audio'/);
+ assert.match(records,/callApi\('call-records'\)/);
+});
+
+test('Call details API is administrator-only even if an operator manually invokes it',()=>{
+ assert.match(api,/if\(action==='call-detail'&&a\.role!=='admin'\)return response\(res,403,\{error:'admin_required'\}\)/);
+ assert.match(api,/if\(a\.role!=='admin'\)q=q\.eq\('worker_user_id',a\.user\.id\)/);
+ assert.match(api,/if\(!canAccessCallAudio\(a\.role\)\)return response\(res,403,\{error:'admin_audio_only'\}\)/);
+});
+
+test('Admin Panel still opens the secured audio/detail modal',()=>{
+ assert.match(ui,/tr\.addEventListener\('click',\(\)=>openDetails\(c,button\)\)/);
+ assert.match(ui,/new CustomEvent\('david:open-call'/);
+ assert.match(detail,/async function openCall\(sid,trigger,overview=null,autoLoadAudio=false\)/);
 });
