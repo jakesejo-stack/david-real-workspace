@@ -16,7 +16,7 @@ test('Live Desk has both operator/customer caption stream and per-line DAVID sug
  assert.match(ui,/renderCaptions\(data\.transcript,active\)/);
  assert.match(ui,/document\.visibilityState==='visible'/);
 });
-test('Only consented, active transcription is rendered, without recording requirement',()=>{
+test('Only authorized, active transcription is rendered, without audio-recording consent requirement',()=>{
  assert.match(ui,/renderCaptions\(\[\],false\)/);
  assert.match(ui,/const active=!!data\.transcription_active/);
  assert.match(ui,/live-consent/);
@@ -65,4 +65,27 @@ test('Free Call admin can load only their own approved task while Twilio keeps s
  assert.match(compiled,/if\(!\["worker","admin"\]\.includes\(g\.role\)\)/);
  assert.match(compiled,/auth\.dialTo!==requested/);
  assert.match(compiled,/Номерът трябва да съвпада с назначения от Admin номер/);
+});
+
+test('Live Captions are permanently visible; they stay off without an active call',()=>{
+ assert.match(ui,/const permissions=node\('div','david-ci-permissions'\);/);
+ assert.match(ui,/const listen=node\('button','btn primary','▶ Live Captions'\);listen.disabled=true;/);
+ assert.match(ui,/callSid=null;listen.disabled=true;record.disabled=true;/);
+ assert.match(ui,/listen.disabled=data.state!=='in-progress'/);
+ assert.doesNotMatch(ui,/Потвърди съгласие за транскрипция/);
+ assert.doesNotMatch(ui,/scope==='recording'\?'.+':'Клиентът изрично разреши ли речта/);
+});
+test('Operator can start consent-independent captions after notice and lawful basis attestation',()=>{
+ assert.match(ui,/scope==='transcription'\?\{noticeDelivered:true,lawfulBasisConfirmed:true\}:\{clientConfirmed:true\}/);
+ assert.match(api,/b.noticeDelivered!==true\|\|b.lawfulBasisConfirmed!==true/);
+ assert.match(api,/transcription_notice_and_lawful_basis_required/);
+ assert.match(api,/operator_attested_notice_and_lawful_basis/);
+ assert.match(ui,/▶ Live Captions/);
+ assert.match(ui,/Аудиозаписът изисква отделно изрично разрешение/);
+});
+test('Audio recording still requires distinct affirmative permission',()=>{
+ assert.match(ui,/scope==='recording'&&!window.confirm/);
+ assert.match(api,/type==='recording'&&b.clientConfirmed!==true/);
+ assert.match(api,/explicit_recording_permission_required/);
+ assert.match(api,/operator_attested_explicit_recording_permission/);
 });
