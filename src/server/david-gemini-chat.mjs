@@ -66,8 +66,7 @@ export async function generateGeminiChat({
   }
  };
  const primary=attempt(0);
- const backup=new Promise((resolve,reject)=>{
-  if(modelAttempts.length<2){reject(new GeminiChatError('No backup available',503,'no_backup'));return}
+ const backup=modelAttempts.length>1?new Promise((resolve,reject)=>{
   backupStart=()=>{
    if(backupStarted||controllers[1].signal.aborted)return;
    backupStarted=true;
@@ -75,7 +74,7 @@ export async function generateGeminiChat({
    attempt(1).then(resolve,reject);
   };
   timer=setTimeout(backupStart,hedgeAfterMs);
- });
+ }):null;
  try{
   const result=await Promise.race([Promise.any(modelAttempts.length>1?[primary,backup]:[primary]),fatal]);
   return result;
