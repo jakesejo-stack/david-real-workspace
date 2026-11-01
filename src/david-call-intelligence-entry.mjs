@@ -226,7 +226,7 @@ function mountDesk(root){
  const host=heading.closest('.main');if(!host||host.querySelector('#david-call-coach-live'))return;
  const panel=node('section','card david-ci-live');panel.id='david-call-coach-live';
  panel.append(node('h2','','✦ DAVID · Live Operator Coach'));
- panel.append(node('p','muted','DAVID слуша само след разрешено транскрибиране. Операторът чете подсказката и решава дали да я използва.'));
+ panel.append(node('p','muted','DAVID показва надписи от разрешен разговор и предлага текстови отговори. Аудиозаписът се управлява отделно.'));
  const meta=node('p','muted','Проверка на активния разговор...');
  const customer=node('div','david-ci-utterance','Клиент: —');
  const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
@@ -240,14 +240,14 @@ function mountDesk(root){
  captions.append(node('p','muted','Надписите ще се появят след реално Twilio обаждане и разрешено транскрибиране.'));
  const answer=node('div','david-ci-answer','DAVID: Очаквам потвърден разговор и първа реплика от клиента.');
  const adviceLabel=node('p','tiny','✦ DAVID подсказва само на оператора. AI не говори по телефона.');
- const permissions=node('div','david-ci-permissions');permissions.hidden=true;
- const notice=node('p','muted','Преди активиране уведомете клиента, че речта се изпраща за разпознаване и AI анализ, и потвърдете разрешението му. Аудиозаписът се разрешава отделно.');
+ const permissions=node('div','david-ci-permissions');
+ const notice=node('p','muted','Live Captions: първо информирай събеседника за транскрипцията и AI подсказките. Използвай само при проверено правно основание за това обработване. Натискането на бутона потвърждава, че си изпълнил тези условия. Аудиозаписът изисква отделно изрично разрешение.');
  const language=node('select','field');language.setAttribute('aria-label','Език на клиента');
  for(const [code,label] of [['bg-BG','Български'],['en-US','English'],['es-ES','Español'],['de-DE','Deutsch'],['fr-FR','Français']]){
   const opt=node('option','',label);opt.value=code;language.append(opt);
  }
- const listen=node('button','btn primary','Потвърди съгласие за транскрипция');
- const record=node('button','btn subtle','Потвърди съгласие за аудиозапис');
+ const listen=node('button','btn primary','▶ Live Captions');listen.disabled=true;
+ const record=node('button','btn subtle','● Запис (след разрешение)');record.disabled=true;
  listen.type='button';record.type='button';
  const actions=node('div','david-ci-consent-actions');actions.append(language,listen,record);
  const stopTrans=node('button','btn red','Спри транскрипцията');
@@ -288,22 +288,25 @@ function mountDesk(root){
   if(follow||current.length<3)captions.scrollTop=captions.scrollHeight;
  };
 
- const consent=async scope=>{
+ const startMedia=async scope=>{
   if(!callSid)return;
-  if(!window.confirm(scope==='recording'?'Клиентът изрично разреши ли аудиозаписването?':'Клиентът изрично разреши ли речта да се транскрибира и анализира от AI?'))return;
+  // Captions: one-click operator attestation of prior notice and assessed legal basis.
+  // Audio recording: separate explicit agreement from the other party is mandatory.
+  if(scope==='recording'&&!window.confirm('Клиентът изрично разреши ли аудиозаписването?'))return;
   const button=scope==='recording'?record:listen;
-  button.disabled=true;result.textContent='Проверявам Twilio и правното потвърждение...';
+  button.disabled=true;result.textContent=scope==='recording'?'Проверявам разрешението за аудиозапис...':'Стартирам Live Captions чрез Twilio...';
+  const attestation=scope==='transcription'?{noticeDelivered:true,lawfulBasisConfirmed:true}:{clientConfirmed:true};
   try{
    const out=await callApi('live-consent',{},{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({call_sid:callSid,scope,clientConfirmed:true,noticeVersion:'david-v1',method:'verbal',language_code:language.value})
+    body:JSON.stringify({call_sid:callSid,scope,...attestation,noticeVersion:'david-v1',method:'verbal',language_code:language.value})
    });
-   result.textContent=out.started?'✓ Twilio '+(scope==='recording'?'аудиозапис':'транскрипция')+' е стартиран.':'Съгласието е отчетено, но обработката още не е стартирана.';
+   result.textContent=out.started?'✓ '+(scope==='recording'?'Аудиозаписът':'Live Captions')+' е стартиран.':'Twilio не потвърди стартиране.';
   }catch(error){result.textContent='Не е активирано: '+error.message;}
   finally{button.disabled=false;update();}
  };
- listen.addEventListener('click',()=>consent('transcription'));
- record.addEventListener('click',()=>consent('recording'));
+ listen.addEventListener('click',()=>startMedia('transcription'));
+ record.addEventListener('click',()=>startMedia('recording'));
  const stop=async scope=>{
   if(!callSid||!window.confirm('Спиране на '+(scope==='recording'?'аудиозаписа':'транскрипцията')+' за този разговор?'))return;
   const button=scope==='recording'?stopRecording:stopTrans;
@@ -324,7 +327,7 @@ function mountDesk(root){
   try{
    const data=await callApi('live-status');
    if(!data.active){
-    callSid=null;permissions.hidden=true;
+    callSid=null;listen.disabled=true;record.disabled=true;stopTrans.hidden=true;stopRecording.hidden=true;
     meta.textContent='Няма активно Twilio обаждане. Надписите не могат да започнат преди реален разговор.';
     customer.textContent='Клиент: —';operator.textContent='Оператор: —';
     answer.textContent='DAVID: Изчаквам да започне разговорът.';
@@ -332,15 +335,15 @@ function mountDesk(root){
     renderCaptions([],false);
     return;
    }
-   callSid=data.call_sid;permissions.hidden=false;
-   listen.disabled=!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
+   callSid=data.call_sid;
+   listen.disabled=data.state!=='in-progress'||!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=data.state!=='in-progress'||!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
-   meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
+   meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Live Captions разрешени':' · Live Captions не са стартирани');
    const active=!!data.transcription_active;
    const transcriptRows=data.transcript||[];
    const lastSegment=transcriptRows.at(-1);
    const secondsWaiting=Date.now()-Date.parse(lastSegment?.created_at||data.transcription_started_at||Date.now());
-   captionState.textContent=active?(transcriptRows.length?'● LIVE CAPTIONS':secondsWaiting>12000?'⚠ Няма реч от Twilio':'● Twilio слуша'):data.transcription_stopped?'○ Транскрипцията е спряна':data.transcription_authorized?'○ Очаква се STT':'● Изключено до съгласие';
+   captionState.textContent=active?(transcriptRows.length?'● LIVE CAPTIONS':secondsWaiting>12000?'⚠ Няма реч от Twilio':'● Twilio слуша'):data.transcription_stopped?'○ Транскрипцията е спряна':data.transcription_authorized?'○ Очаква се STT':'● Изчаква стартиране';
    captionState.className='tag '+(active?'green':'gray');
    customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
    operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
@@ -354,7 +357,7 @@ function mountDesk(root){
    }
    const lastClient=active?(data.transcript||[]).filter(x=>x.speaker==='client').at(-1):null;
    const latestHint=lastClient?.david_hint;
-   answer.textContent='DAVID: '+(!active?'Включи транскрипцията след съгласие, за да получаваш AI подсказки.':latestHint||(
+   answer.textContent='DAVID: '+(!active?'Информирай събеседника и при валидно правно основание натисни ▶ Live Captions, за да получаваш AI подсказки.':latestHint||(
     lastClient?(data.coach_feature_enabled===false?'AI подсказките още не са активирани.':
      Date.now()-Date.parse(lastClient.created_at||0)>10000?'Няма получена подсказка за тази реплика. Продължи разговора самостоятелно.':'Обработвам последната клиентска реплика...'):'Изчаквам клиента. Ще предложа какво да кажеш след неговата реплика.'
    ));
