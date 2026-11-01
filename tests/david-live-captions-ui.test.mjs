@@ -54,7 +54,7 @@ test('No-call captions remain functional without redundant dialer/preflight bann
  assert.doesNotMatch(ui,/david-ci-start-help/);
  assert.doesNotMatch(ui,/Провери Twilio и задача/);
  assert.doesNotMatch(ui,/#deskCallStart/);
- assert.match(ui,/Няма активно Twilio обаждане/);
+ assert.match(ui,/Телефонът е свободен/);
  assert.match(ui,/Live Captions · Двата гласа/);
  assert.match(ui,/lastCaptionSignature='missing_stt'/);
 });
@@ -69,9 +69,9 @@ test('Free Call admin can load only their own approved task while Twilio keeps s
 
 test('Live Captions are permanently visible; they stay off without an active call',()=>{
  assert.match(ui,/const permissions=node\('div','david-ci-permissions'\);/);
- assert.match(ui,/const listen=node\('button','btn primary','▶ Live Captions'\);listen.disabled=true;/);
- assert.match(ui,/callSid=null;listen.disabled=true;record.disabled=true;/);
- assert.match(ui,/listen.disabled=data.state!=='in-progress'/);
+ assert.match(ui,/const listen=node\('button','btn primary','▶ Live Captions'\);/);
+ assert.match(ui,/callSid=null;listen.disabled=activationPending;listen.textContent='▶ Live Captions';record.disabled=true;/);
+ assert.match(ui,/listen.disabled=activationPending\|\|!!data.transcription_active/);
  assert.doesNotMatch(ui,/Потвърди съгласие за транскрипция/);
  assert.doesNotMatch(ui,/scope==='recording'\?'.+':'Клиентът изрично разреши ли речта/);
 });
@@ -88,4 +88,14 @@ test('Audio recording still requires distinct affirmative permission',()=>{
  assert.match(api,/type==='recording'&&b.clientConfirmed!==true/);
  assert.match(api,/explicit_recording_permission_required/);
  assert.match(api,/operator_attested_explicit_recording_permission/);
+});
+
+test('operator always sees live caption controls before transcript while idle',()=>{
+ assert.match(ui,/panel.append\(meta,permissions,customer,operator,captionHead,captions/);
+ assert.match(ui,/\.david-ci-captions\.is-idle\{height:112px\}/);
+ assert.match(ui,/Първо започни обаждане от телефонния панел/);
+ assert.match(ui,/dial\.scrollIntoView/);
+ assert.match(ui,/Изчакай другият човек да вдигне/);
+ assert.doesNotMatch(ui,/listen.disabled=data.state!=='in-progress'/);
+ assert.match(api,/if\(live.status!=='in-progress'\)return response\(res,409/);
 });
