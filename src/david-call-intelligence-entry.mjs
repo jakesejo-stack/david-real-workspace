@@ -228,47 +228,6 @@ function mountDesk(root){
  panel.append(node('h2','','✦ DAVID · Live Operator Coach'));
  panel.append(node('p','muted','DAVID слуша само след разрешено транскрибиране. Операторът чете подсказката и решава дали да я използва.'));
  const meta=node('p','muted','Проверка на активния разговор...');
- const startHelp=node('div','david-ci-start-help');
- const startMessage=node('p','muted','Live Captions се включват само към свързан Twilio разговор. Започни обаждане от телефонния панел по-долу.');
- const gotoCall=node('button','btn primary','☎ Към набиране');
- gotoCall.type='button';
- gotoCall.addEventListener('click',()=>{
-  const dial=root.querySelector('#deskCallStart')||
-   [...root.querySelectorAll('.sf-sales-phone-actions button')]
-    .find(x=>/Набери/.test(x.textContent||''));
-  if(dial){
-   dial.scrollIntoView({behavior:'smooth',block:'center'});
-   dial.focus({preventScroll:true});
-  }else{
-   meta.textContent='Няма достъпен телефонен панел. Отвори ЗАДАЧИ и провери одобрената задача за обаждане.';
-  }
- });
- const verifyCall=node('button','btn subtle','Провери Twilio и задача');
- verifyCall.type='button';
- const preflightFeedback=node('p','tiny','');
- verifyCall.addEventListener('click',async()=>{
-  verifyCall.disabled=true;
-  preflightFeedback.textContent='Проверявам телефонната готовност без да набирам номер...';
-  try{
-   const info=await callApi('task-preflight');
-   const errors=info.errors||[];
-   const names={
-    approved_task_missing:'Няма разрешена задача и номер за днес',
-    daily_attempt_already_used:'Дневният лимит за обаждания е достигнат',
-    missing_server_config:'Липсва Twilio настройка на сървъра',
-    live_calls_disabled:'Изходящите разговори са изключени',
-    twilio_account_auth_invalid:'Twilio акаунтът не е валидиран',
-    twilio_api_key_invalid:'Twilio API ключът е невалиден',
-    twiml_voice_url_wrong:'Twilio Voice URL е неправилен',
-    caller_id_not_verified:'Номерът за изходящо обаждане не е потвърден',
-    trial_destination_not_verified:'Тестовият получател не е потвърден в Twilio'
-   };
-   preflightFeedback.textContent=info.ready?'✓ Twilio и дневната задача са готови. Натисни Към набиране.':
-    'Не може да се набере още: '+(errors.map(x=>names[x]||x).join(' · ')||'Неизвестна причина');
-  }catch(error){preflightFeedback.textContent='Проверката е неуспешна: '+error.message}
-  finally{verifyCall.disabled=false}
- });
- startHelp.append(startMessage,gotoCall,verifyCall,preflightFeedback);
  const customer=node('div','david-ci-utterance','Клиент: —');
  const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
  const captionHead=node('div','david-ci-captions-head');
@@ -297,7 +256,7 @@ function mountDesk(root){
  actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
  permissions.append(notice,actions,result);
- panel.append(meta,startHelp,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
+ panel.append(meta,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
  heading.insertAdjacentElement('afterend',panel);
  let busy=false, timer=null,callSid=null,lastCaptionSignature='';
  const renderCaptions=(lines,enabled)=>{
@@ -365,7 +324,7 @@ function mountDesk(root){
   try{
    const data=await callApi('live-status');
    if(!data.active){
-    callSid=null;permissions.hidden=true;startHelp.hidden=false;
+    callSid=null;permissions.hidden=true;
     meta.textContent='Няма активно Twilio обаждане. Надписите не могат да започнат преди реален разговор.';
     customer.textContent='Клиент: —';operator.textContent='Оператор: —';
     answer.textContent='DAVID: Изчаквам да започне разговорът.';
@@ -373,7 +332,7 @@ function mountDesk(root){
     renderCaptions([],false);
     return;
    }
-   callSid=data.call_sid;permissions.hidden=false;startHelp.hidden=true;
+   callSid=data.call_sid;permissions.hidden=false;
    listen.disabled=!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
@@ -423,9 +382,6 @@ css.textContent=`
 .david-ci-table tr:last-child td{border-bottom:0}
 .david-ci-table-secondary{display:block;color:#617b94;font-size:11px;margin-top:4px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
-.david-ci-start-help{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px;border:1px solid #c8d8ef;border-radius:12px;background:#f1f6ff;margin:14px 0}
-.david-ci-start-help p{margin:0}
-.david-ci-start-help[hidden]{display:none!important}
 .david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
 .david-ci-consent-actions select{width:auto;flex:0 1 180px}
 .david-ci-permissions[hidden]{display:none!important}
