@@ -473,6 +473,9 @@ export async function handleCallIntelligence(req,res,action){
  try{
   const a=await authorized(req);
   if(!a)return response(res,403,{error:'approved_active_google_member_required'});
+  // Full call details, transcript and any audio links are for administrators only.
+  // Workers only get their own read-only entries through call-records.
+  if(action==='call-detail'&&a.role!=='admin')return response(res,403,{error:'admin_required'});
   if(action==='browser-record-prepare')return browserPrepare(req,res,a);
   if(action==='browser-record-complete')return browserComplete(req,res,a);
   if(action==='browser-record-link')return browserLink(req,res,a);
