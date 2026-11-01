@@ -385,10 +385,13 @@ function mountDesk(root){
    captionState.className='tag '+(active?'green':'gray');
    customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
    operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
-   renderCaptions(data.transcript,active);
    if(active&&!transcriptRows.length&&secondsWaiting>12000){
-    captions.replaceChildren(node('p','muted','Twilio е свързан към транскрипцията, но не е изпратил завършена реплика. Проверете езика, говорете на глас и проверете Twilio състоянието.'));
-    lastCaptionSignature='';
+    if(lastCaptionSignature!=='missing_stt'){
+     captions.replaceChildren(node('p','muted','Twilio е стартирал транскрипция, но още не е изпратил завършена реплика. Проверете езика и състоянието на Twilio.'));
+     lastCaptionSignature='missing_stt';
+    }
+   }else{
+    renderCaptions(data.transcript,active);
    }
    const lastClient=active?(data.transcript||[]).filter(x=>x.speaker==='client').at(-1):null;
    const latestHint=lastClient?.david_hint;
