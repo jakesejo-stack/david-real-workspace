@@ -23,7 +23,7 @@ test('Local media is preserved if no duration repair is needed',async()=>{
 test('Recorded audio starts only after verbal client consent and continues until hangup',()=>{
  assert.match(frontend,/clientConfirmed:true,noticeVersion:'david-v1',method:'verbal'/);
  assert.match(frontend,/stopBrowserRecording\('call_ended'\)/);
- assert.match(frontend,/recording\.start\(1000\)/);
+ assert.match(frontend,/recorder\.start\(1000\)/);
  assert.match(frontend,/entry\.startedMono=performance\.now\(\)/);
  assert.match(frontend,/entry\.stopReason='limit'/);
  assert.match(frontend,/stopBrowserRecording\('manual_stop'\)/);
