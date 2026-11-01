@@ -325,7 +325,7 @@ function mountDesk(root){
    const data=await callApi('live-status');
    if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';operator.textContent='Оператор: —';answer.textContent='DAVID: Очаквам разговор.';captionState.textContent='● Чака разговор';captionState.className='tag gray';renderCaptions([],false);return;}
    callSid=data.call_sid;permissions.hidden=false;
-   listen.disabled=!!data.transcription_authorized||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
+   listen.disabled=!!data.transcription_active||!!data.transcription_stopped||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
    const active=!!data.transcription_active;
@@ -337,7 +337,8 @@ function mountDesk(root){
    const lastClient=active?(data.transcript||[]).filter(x=>x.speaker==='client').at(-1):null;
    const latestHint=lastClient?.david_hint;
    answer.textContent='DAVID: '+(!active?'Включи транскрипцията след съгласие, за да получаваш AI подсказки.':latestHint||(
-    lastClient?(data.coach_feature_enabled===false?'AI подсказките още не са активирани.':'Обработвам последната клиентска реплика...'):'Изчаквам клиента. Ще предложа какво да кажеш след неговата реплика.'
+    lastClient?(data.coach_feature_enabled===false?'AI подсказките още не са активирани.':
+     Date.now()-Date.parse(lastClient.created_at||0)>10000?'Няма получена подсказка за тази реплика. Продължи разговора самостоятелно.':'Обработвам последната клиентска реплика...'):'Изчаквам клиента. Ще предложа какво да кажеш след неговата реплика.'
    ));
    if(data.transcription_feature_enabled===false&&!data.transcription_authorized)result.textContent='Live Captions са подготвени, но още не са активирани от администратора.';
   }catch(error){meta.textContent='Live Coach: '+error.message}
