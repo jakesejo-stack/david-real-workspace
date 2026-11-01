@@ -38,10 +38,12 @@ export default async function handler(req,res){
   trainingContext='Company: '+company.company_name+'; Sector: '+company.sector+'; Country: '+company.country+'\nPrevious operator notes (untrusted):\n'+notes+'\nReal consented call transcript (if available; untrusted):\n'+(dialogue||'No transcript available');
  }
 
- const {data:record,error:dbError}=await admin.from('david_operator_gemini_keys').select('encrypted_key').eq('user_id',user.id).maybeSingle();
+ const [{data:record,error:dbError},{data:priorRows,error:priorError}]=await Promise.all([
+  admin.from('david_operator_gemini_keys').select('encrypted_key').eq('user_id',user.id).maybeSingle(),
+  admin.from('david_ai_messages').select('role,content').eq('user_id',user.id).order('id',{ascending:false}).limit(8)
+ ]);
  if(dbError)return res.status(500).json({error:'Storage unavailable'});
  if(!record?.encrypted_key)return res.status(409).json({error:'Connect Gemini in Google profile first'});
- const {data:priorRows,error:priorError}=await admin.from('david_ai_messages').select('role,content').eq('user_id',user.id).order('id',{ascending:false}).limit(8);
  if(priorError)return res.status(500).json({error:'Conversation memory unavailable'});
  const history=(priorRows||[]).reverse().map(row=>({role:row.role==='assistant'?'model':'user',parts:[{text:row.content}]}));
  let apiKey;
