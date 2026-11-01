@@ -10,6 +10,8 @@ on:
       - "src/soulflame-ai-entry.mjs"
       - "tests/david-soulflame-ai-reliability.test.mjs"
       - "src/david-call-intelligence-entry.mjs"
+      - "src/david-microphone-live-captions.mjs"
+      - "tests/david-microphone-live-captions.test.mjs"
       - "src/profile-gemini-entry.mjs"
       - "src/operator-api-panel.mjs"
       - "tests/profile-session-ux.test.mjs"
@@ -36,6 +38,7 @@ jobs:
           node --check 'api/integrations/david/[action].js'
           node --check src/server/david-live-calls.mjs
           node --check src/david-call-intelligence-entry.mjs
+          node --check src/david-microphone-live-captions.mjs
           node --check src/profile-gemini-entry.mjs
           node --check src/operator-api-panel.mjs
           node --check api/soulflame-ai.js
