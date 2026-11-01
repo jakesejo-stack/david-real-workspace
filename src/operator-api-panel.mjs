@@ -5,7 +5,8 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   const node=(tag,text)=>{const e=d.createElement(tag);if(text)e.textContent=text;return e};
   const section=node('section');section.className='card';
   section.append(node('h2','API · Моят Gemini'));
-  section.append(node('p','1. Отвори Gemini, копирай личния си API ключ. 2. Върни се тук, постави го и натисни Запиши.'));
+  const instructions=node('p','1. Отвори Gemini, копирай личния си API ключ. 2. Върни се тук, постави го и натисни Запиши.');
+  section.append(instructions);
   const link=node('a','🔑 Генерирай Gemini API ключ');
   link.className='btn primary';link.style.display='inline-block';link.style.textDecoration='none';link.style.marginBottom='16px';
   link.href='https://aistudio.google.com/apikey';link.target='_blank';link.rel='noopener noreferrer';
@@ -24,7 +25,15 @@ export function mountOperatorApiPanel(container,{getConnection,saveKey}={}) {
   container.replaceChildren(section);
   // No localStorage, sessionStorage, plaintext DB writes, or key logging.
   if(typeof saveKey!=='function'){button.disabled=true;status.textContent='Защитеното запазване още не е свързано.';return;}
-  const lock=()=>{field.value='';field.disabled=true;button.disabled=true;button.textContent='🔒 Свързан с профила';link.style.display='none';};
+  const lock=()=>{
+    // Replacing the secret-entry UI with a compact success tick prevents repeat prompts.
+    field.value='';field.disabled=true;button.disabled=true;
+    instructions.hidden=true;instructions.style.display='none';
+    link.hidden=true;link.style.display='none';
+    label.hidden=true;label.style.display='none';
+    entry.hidden=true;entry.style.display='none';
+    syncInfo.hidden=true;syncInfo.style.display='none';
+  };
   let saving=false;
   button.addEventListener('click',async()=>{
     if(saving)return;
