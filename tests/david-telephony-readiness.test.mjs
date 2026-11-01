@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {publicReadiness} from '../api/config.js';
 const ready={
  SUPABASE_URL:'https://sample.supabase.co',SUPABASE_ANON_KEY:'public-anon',
@@ -36,4 +37,21 @@ test('recordings need explicit additional feature flags',()=>{
  const x=publicReadiness({...ready,ENABLE_RECORDING:'true'});
  assert.equal(x.recordingEnabled,false);
  assert.equal(publicReadiness({...ready,ENABLE_RECORDING:'true',DAVID_LIVE_RECORDING_ENABLED:'true'}).recordingEnabled,true);
+});
+
+test('TEST demo panels are removed while actual Twilio dialer remains active',()=>{
+ const desk=readFileSync(new URL('../recovery/compiled-frontend/assets/index-p3-2.js',import.meta.url),'utf8');
+ for(const demo of ['davidTestCard','davidVoiceTryout','davidVoiceDemoMode','davidVoiceRealMode',
+  'davidTestStart','davidTestAnswer','davidTestEnd','DPP-TEST-1948',
+  'Български глас · TEST preview','SIMULATION · НЯМА РЕАЛЕН РАЗГОВОР']){
+  assert.equal(desk.includes(demo),false,'Removed demonstration must stay absent: '+demo);
+ }
+ assert.match(desk,/async function davidStartTaskTwilio\(\)/);
+ assert.match(desk,/N\("deskCallStart"\)\.onclick=\(\)=>davidStartTaskTwilio\(\)/);
+ assert.match(desk,/N\("deskCallEnd"\)\.onclick/);
+ assert.match(desk,/☎ Start Real Call/);
+ assert.match(desk,/deskWorkerTask/);
+ assert.match(desk,/david_daily_worker_tasks/);
+ assert.match(desk,/N\("deskManualNumber"\)/);
+ assert.match(desk,/if\(!g\.config\?\.telephonyConfigured\)/);
 });
