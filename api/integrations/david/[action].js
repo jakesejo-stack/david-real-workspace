@@ -198,18 +198,36 @@ async function handleTaskDialFinished(req,res){
  const sid=String(req.body?.CallSid||'');
  if(!callSidPattern.test(sid))return response(res,400,{error:'bad_call_sid'});
  const raw=String(req.body?.DialCallStatus||'failed');
- const state=raw==='completed'?'completed':raw==='canceled'?'canceled':'failed';
  const duration=Number(req.body?.DialCallDuration);
  const db=serviceClient();
- const endedAt=new Date();
- const patch={state,ended_at:endedAt.toISOString(),updated_at:endedAt.toISOString()};
- const attemptPatch={status:raw,updated_at:new Date().toISOString()};
- if(Number.isInteger(duration)&&duration>=0&&duration<=7200){attemptPatch.duration_seconds=duration;if(raw==='completed')patch.started_at=new Date(endedAt.getTime()-duration*1000).toISOString();}
- const [s,a]=await Promise.all([
-  db.from('david_live_call_sessions').update(patch).eq('call_sid',sid),
-  db.from('david_task_call_attempts').update(attemptPatch).eq('parent_call_sid',sid)
- ]);
- if(s.error||a.error)return response(res,503,{error:'call_completion_unavailable'});
+ const {data:prior,error:priorError}=await db.from('david_live_call_sessions')
+  .select('state,ended_at').eq('call_sid',sid).maybeSingle();
+ if(priorError||!prior)return response(res,503,{error:'call_completion_unavailable'});
+ // In conference mode the parent's <Dial> status says whether the operator joined
+ // the room, NOT whether the destination answered. The customer leg's signed status
+ // callback is authoritative. If it has already ended, preserve its outcome.
+ if(!prior.ended_at){
+  const conference=process.env.DAVID_CONFERENCE_CALLS_ENABLED==='true';
+  const answered=conference?prior.state==='in-progress':raw==='completed';
+  const state=answered?'completed':raw==='canceled'?'canceled':'failed';
+  const status=answered?'completed':
+   ['canceled','busy','failed','no-answer'].includes(raw)?raw:'failed';
+  const endedAt=new Date();
+  const patch={state,ended_at:endedAt.toISOString(),updated_at:endedAt.toISOString()};
+  const attemptPatch={status,updated_at:endedAt.toISOString()};
+  if(!conference&&answered&&Number.isInteger(duration)&&duration>=0&&duration<=7200){
+   attemptPatch.duration_seconds=duration;
+   patch.started_at=new Date(endedAt.getTime()-duration*1000).toISOString();
+  }
+  const {data:updated,error:ue}=await db.from('david_live_call_sessions')
+   .update(patch).eq('call_sid',sid).is('ended_at',null).select('call_sid').maybeSingle();
+  if(ue)return response(res,503,{error:'call_completion_unavailable'});
+  if(updated){
+   const {error:ae}=await db.from('david_task_call_attempts')
+    .update(attemptPatch).eq('parent_call_sid',sid);
+   if(ae)return response(res,503,{error:'call_completion_unavailable'});
+  }
+ }
  const xml=new twilio.twiml.VoiceResponse();xml.hangup();
  res.setHeader('Content-Type','text/xml; charset=utf-8');
  res.setHeader('Cache-Control','no-store');
