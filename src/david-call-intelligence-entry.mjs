@@ -229,7 +229,17 @@ function mountDesk(root){
  panel.append(node('p','muted','DAVID слуша само след разрешено транскрибиране. Операторът чете подсказката и решава дали да я използва.'));
  const meta=node('p','muted','Проверка на активния разговор...');
  const customer=node('div','david-ci-utterance','Клиент: —');
+ const operator=node('div','david-ci-utterance david-ci-operator','Оператор: —');
+ const captionHead=node('div','david-ci-captions-head');
+ captionHead.append(node('h3','','Live Captions · Двата гласа'));
+ const captionState=node('span','tag gray','● Чака разрешение');
+ captionHead.append(captionState);
+ const captions=node('div','david-ci-captions');
+ captions.setAttribute('role','log');captions.setAttribute('aria-label','Живи надписи от разговора');
+ captions.setAttribute('aria-live','polite');captions.setAttribute('aria-relevant','additions');
+ captions.append(node('p','muted','Надписите ще се появят след реално Twilio обаждане и разрешено транскрибиране.'));
  const answer=node('div','david-ci-answer','DAVID: Очаквам потвърден разговор и първа реплика от клиента.');
+ const adviceLabel=node('p','tiny','✦ DAVID подсказва само на оператора. AI не говори по телефона.');
  const permissions=node('div','david-ci-permissions');permissions.hidden=true;
  const notice=node('p','muted','Преди активиране уведомете клиента, че речта се изпраща за разпознаване и AI анализ, и потвърдете разрешението му. Аудиозаписът се разрешава отделно.');
  const language=node('select','field');language.setAttribute('aria-label','Език на клиента');
@@ -246,9 +256,38 @@ function mountDesk(root){
  actions.append(stopTrans,stopRecording);
  const result=node('p','muted','');
  permissions.append(notice,actions,result);
- panel.append(meta,customer,answer,permissions);
+ panel.append(meta,customer,operator,captionHead,captions,answer,adviceLabel,permissions);
  heading.insertAdjacentElement('afterend',panel);
- let busy=false, timer=null,callSid=null;
+ let busy=false, timer=null,callSid=null,lastCaptionSignature='';
+ const renderCaptions=(lines,enabled)=>{
+  if(!enabled){
+   if(lastCaptionSignature!=='disabled'){
+    lastCaptionSignature='disabled';captions.replaceChildren(node('p','muted','Няма разрешена транскрипция. Live Captions са изключени.'));
+   }
+   return;
+  }
+  const current=(lines||[]).slice(-24);
+  const signature=JSON.stringify(current.map(x=>[x.id,x.speaker,x.content,x.david_hint]));
+  if(signature===lastCaptionSignature)return;
+  lastCaptionSignature=signature;
+  const follow=captions.scrollTop+captions.clientHeight>=captions.scrollHeight-65;
+  captions.replaceChildren();
+  if(!current.length)captions.append(node('p','muted','Слушам разрешения разговор. Изчаквам първата завършена реплика...'));
+  for(const line of current){
+   const isClient=line.speaker==='client';
+   const entry=node('div','david-ci-caption-line '+(isClient?'client':'operator'));
+   const head=node('strong','',isClient?'Клиент':'Оператор');
+   entry.append(head,node('p','',String(line.content||'')));
+   if(line.david_hint){
+    const hint=node('div','david-ci-caption-advice');
+    hint.append(node('strong','','✦ DAVID предлага:'),node('p','',String(line.david_hint)));
+    entry.append(hint);
+   }
+   captions.append(entry);
+  }
+  if(follow||current.length<3)captions.scrollTop=captions.scrollHeight;
+ };
+
  const consent=async scope=>{
   if(!callSid)return;
   if(!window.confirm(scope==='recording'?'Клиентът изрично разреши ли аудиозаписването?':'Клиентът изрично разреши ли речта да се транскрибира и анализира от AI?'))return;
@@ -284,13 +323,23 @@ function mountDesk(root){
   if(busy||!panel.isConnected)return;busy=true;
   try{
    const data=await callApi('live-status');
-   if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';answer.textContent='DAVID: Очаквам разговор.';return;}
+   if(!data.active){callSid=null;permissions.hidden=true;meta.textContent='Няма активен разрешен Twilio разговор.';customer.textContent='Клиент: —';operator.textContent='Оператор: —';answer.textContent='DAVID: Очаквам разговор.';captionState.textContent='● Чака разговор';captionState.className='tag gray';renderCaptions([],false);return;}
    callSid=data.call_sid;permissions.hidden=false;
-   listen.disabled=!!data.transcription_authorized;record.disabled=!!data.recording_authorized;
+   listen.disabled=!!data.transcription_authorized||data.transcription_feature_enabled===false;record.disabled=!!data.recording_authorized||data.recording_feature_enabled===false;
    stopTrans.hidden=!data.transcription_active;stopRecording.hidden=!data.recording_active;
    meta.textContent=(data.company?.company_name||'Без свързана фирма')+' · '+data.state+' · '+shortSid(data.call_sid)+(data.transcription_authorized?' · Транскрипция разрешена':' · Транскрипция не е разрешена');
-   customer.textContent='Клиент: '+(data.latest_customer_line||'Очаквам клиентска реплика');
-   answer.textContent='DAVID: '+(data.suggestion||'Очаквам клиентската реплика, след която ще предложа точен отговор за оператора.');
+   const active=!!data.transcription_active;
+   captionState.textContent=active?'● LIVE CAPTIONS':data.transcription_authorized?'○ Транскрипцията е спряна':'● Изключено до съгласие';
+   captionState.className='tag '+(active?'green':'gray');
+   customer.textContent='Клиент: '+(active&&data.latest_customer_line||'Очаквам клиентска реплика');
+   operator.textContent='Оператор: '+(active&&data.latest_operator_line||'Очаквам речта на оператора');
+   renderCaptions(data.transcript,active);
+   const lastClient=active?(data.transcript||[]).filter(x=>x.speaker==='client').at(-1):null;
+   const latestHint=lastClient?.david_hint;
+   answer.textContent='DAVID: '+(!active?'Включи транскрипцията след съгласие, за да получаваш AI подсказки.':latestHint||(
+    lastClient?(data.coach_feature_enabled===false?'AI подсказките още не са активирани.':'Обработвам последната клиентска реплика...'):'Изчаквам клиента. Ще предложа какво да кажеш след неговата реплика.'
+   ));
+   if(data.transcription_feature_enabled===false&&!data.transcription_authorized)result.textContent='Live Captions са подготвени, но още не са активирани от администратора.';
   }catch(error){meta.textContent='Live Coach: '+error.message}
   finally{busy=false;}
  };
@@ -317,7 +366,18 @@ css.textContent=`
 .david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
 .david-ci-consent-actions select{width:auto;flex:0 1 180px}
 .david-ci-permissions[hidden]{display:none!important}
-.david-ci-utterance{padding:14px;border-radius:12px;background:#eaf3ff;margin:12px 0}
+.david-ci-utterance{padding:12px;border-radius:12px;background:#eaf3ff;margin:9px 0}
+.david-ci-operator{background:#f2f5fa}
+.david-ci-captions-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 8px}
+.david-ci-captions-head h3{margin:0}
+.david-ci-captions{height:260px;overflow-y:auto;overscroll-behavior:contain;background:#f7f9fc;border:1px solid #dbe5f2;border-radius:14px;padding:12px}
+.david-ci-caption-line{padding:10px 12px;background:#fff;border:1px solid #dbe5f2;border-radius:11px;margin:7px 0;overflow-wrap:anywhere}
+.david-ci-caption-line.client{border-left:4px solid #e6a44e}
+.david-ci-caption-line.operator{border-left:4px solid #307dd9}
+.david-ci-caption-line strong{font-size:12px;color:#345b79}
+.david-ci-caption-line p{margin:4px 0 0;white-space:pre-wrap}
+.david-ci-caption-advice{background:#e4f9ee;border-radius:9px;padding:10px;margin-top:8px;color:#086347}
+.david-ci-caption-advice strong{color:#08764e}
 .david-ci-answer{padding:14px;border-radius:12px;background:#dff8ed;color:#0a533b;line-height:1.6;font-size:15px;margin:10px 0}
 .david-ci-modal{position:fixed;inset:0;background:#0b1d37a8;z-index:1100;display:flex;align-items:center;justify-content:center;padding:18px}
 .david-ci-dialog{display:flex;flex-direction:column;background:#f7faff;width:min(100%,980px);height:min(92vh,980px);border-radius:18px;box-shadow:0 20px 70px #0b1d3760;overflow:hidden}
