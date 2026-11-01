@@ -121,15 +121,36 @@ async function webhookTranscript(req,res){
  if(s.transcription_sid&&s.transcription_sid!==tsid)return response(res,409,{error:'transcription_session_mismatch'});
  const evt=String(b.TranscriptionEvent||'');
  if(evt==='transcription-started'){
-  await db.from('david_live_call_sessions').update({transcription_sid:tsid,updated_at:new Date().toISOString()}).eq('call_sid',sid);
+  // Twilio has acknowledged provider startup. Keep failure state if a later
+  // webhook already reported an error (callbacks may arrive out of order).
+  const {error:ue}=await db.from('david_live_call_sessions').update({
+   transcription_sid:tsid,transcription_provider_started_at:new Date().toISOString(),
+   transcription_provider_state:'started',updated_at:new Date().toISOString()
+  }).eq('call_sid',sid).is('transcription_stopped_at',null);
+  if(ue)return response(res,503,{error:'transcription_lifecycle_storage_unavailable'});
   return response(res,200,{ok:true});
  }
- if(evt==='transcription-stopped'||evt==='transcription-error'){
-  // Reflect provider-initiated stops in the operator UI. Never mark recording consent here.
-  await db.from('david_live_call_sessions').update({
+ if(evt==='transcription-error'){
+  // Do not hide the reason for an immediate provider failure. No transcript,
+  // tokens, account secrets, or raw webhook payload are logged or stored.
+  const errorCode=String(b.TranscriptionErrorCode||'unknown').replace(/[^0-9a-z_-]/gi,'').slice(0,24);
+  const errorMessage=String(b.TranscriptionError||'Twilio transcription unavailable').replace(/[\r\n<>]/g,' ').slice(0,180);
+  const {error:ue}=await db.from('david_live_call_sessions').update({
+   transcription_sid:tsid,transcription_provider_state:'error',
+   transcription_error_code:errorCode,transcription_error_message:errorMessage,
    transcription_stopped_at:new Date().toISOString(),updated_at:new Date().toISOString()
-  }).eq('call_sid',sid).eq('transcription_sid',tsid);
+  }).eq('call_sid',sid);
+  if(ue)return response(res,503,{error:'transcription_lifecycle_storage_unavailable'});
+  console.warn('DAVID STT provider error',{code:errorCode});
   return response(res,200,{ok:true});
+ }
+ if(evt==='transcription-stopped'){
+  const {error:ue}=await db.from('david_live_call_sessions').update({
+   transcription_stopped_at:new Date().toISOString(),
+   transcription_provider_state:s.transcription_provider_state==='error'?'error':'stopped',
+   updated_at:new Date().toISOString()
+  }).eq('call_sid',sid);
+  return response(res,ue?503:200,ue?{error:'transcription_lifecycle_storage_unavailable'}:{ok:true});
  }
  if(evt!=='transcription-content')return response(res,400,{error:'unsupported_event'});
  // Only finalized utterances are persisted or sent to Gemini; interim STT is untrusted.
@@ -245,14 +266,17 @@ async function handleConsent(req,res,a){
     statusCallbackUrl:pathFor('live-transcript'),statusCallbackMethod:'POST',
     languageCode:language,
     transcriptionEngine:'google',track:'both_tracks',partialResults:false,
-    // Google Speech v2 short supports bg-BG; telephony isn't listed for Bulgarian.
-    ...(language==='bg-BG'?{speechModel:'short'}:{}),
+    // Google STT v2 global bg-BG short does NOT advertise auto punctuation.
+    // Twilio defaults it to true; disable this unsupported combination.
+    ...(language==='bg-BG'?{speechModel:'short',enableAutomaticPunctuation:false}:{}),
     inboundTrackLabel:'operator',outboundTrackLabel:'client'
    });
    if(!transOK(t.sid))throw Error('invalid_transcription_sid');
    const {error:writeError}=await a.db.from('david_live_call_sessions').update({transcription_sid:t.sid,updated_at:new Date().toISOString()}).eq('call_sid',sid);
    if(writeError)console.warn('DAVID transcription SID metadata write failed');
-   return response(res,200,{authorization_logged:true,started:true,scope:type});
+   // A Twilio resource SID alone is not proof the provider is running.
+   // Wait for signed transcription-started/content event before indicating LIVE.
+   return response(res,202,{authorization_logged:true,accepted:true,started:false,scope:type});
   }
   const recording=await client.calls(sid).recordings.create({
    recordingChannels:'dual',recordingTrack:'both',
@@ -539,7 +563,7 @@ export async function handleCallIntelligence(req,res,action){
    // Desk always reports the SIGNED-IN operator's own active call, even for admins.
    // Admin inbox has its own separate, authorized overview.
    const q=a.db.from('david_live_call_sessions')
-    .select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at')
+    .select('call_sid,worker_user_id,company_id,company_snapshot,started_at,state,transcription_consent_at,recording_consent_at,transcription_sid,recording_sid,transcription_stopped_at,recording_stopped_at,transcription_provider_started_at,transcription_provider_state,transcription_error_code,transcription_error_message')
     .eq('worker_user_id',a.user.id)
     .in('state',['initiated','ringing','in-progress'])
     .gte('started_at',new Date(Date.now()-20*60*1000).toISOString())
@@ -571,9 +595,13 @@ export async function handleCallIntelligence(req,res,action){
      on_hold:conference.data?.hold===true,transfer_status:conference.data?.transfer_status||null,
      ...capabilities,
      transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
-     transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,
-     transcription_started_at:data.transcription_consent_at||null,
+     transcription_active:data.transcription_provider_state==='started'&&!data.transcription_stopped_at,
+     transcription_start_pending:!!data.transcription_sid&&!data.transcription_provider_state&&!data.transcription_stopped_at,
+     transcription_started_at:data.transcription_provider_started_at||null,
      transcription_stopped:!!data.transcription_stopped_at,
+     transcription_provider_state:data.transcription_provider_state||null,
+     transcription_error_code:data.transcription_error_code||null,
+     transcription_error_message:data.transcription_error_message||null,
      recording_active:!!data.recording_sid&&!data.recording_stopped_at,
      latest_customer_line:customer?.content||null,latest_operator_line:operator?.content||null,
      suggestion:suggest.data?.[0]?.suggestion||null,suggestion_at:suggest.data?.[0]?.created_at||null,
