@@ -221,12 +221,14 @@ async function handleConsent(req,res,a){
  // Twilio start is AFTER consent audit, never in initial dial TwiML.
  try{
   if(type==='transcription'){
+   const language=['bg-BG','en-US','es-ES','de-DE','fr-FR'].includes(b.language_code)
+    ?b.language_code:(['bg-BG','en-US','es-ES','de-DE','fr-FR'].includes(s.language_code)?s.language_code:'bg-BG');
    const t=await client.calls(sid).transcriptions.create({
     statusCallbackUrl:pathFor('live-transcript'),statusCallbackMethod:'POST',
-    languageCode:['bg-BG','en-US','es-ES','de-DE','fr-FR'].includes(b.language_code)?b.language_code:(s.language_code||'bg-BG'),
+    languageCode:language,
     transcriptionEngine:'google',track:'both_tracks',partialResults:false,
-    // bg-BG supports Google STT short; default telephony is not supported for Bulgarian.
-    ...(b.language_code==='bg-BG'?{speechModel:'short'}:{}),
+    // Google Speech v2 short supports bg-BG; telephony isn't listed for Bulgarian.
+    ...(language==='bg-BG'?{speechModel:'short'}:{}),
     inboundTrackLabel:'operator',outboundTrackLabel:'client'
    });
    if(!transOK(t.sid))throw Error('invalid_transcription_sid');
