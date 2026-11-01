@@ -22,10 +22,29 @@ export function publicReadiness(env){
    !liveCallsEnabled?'live_calls_disabled':'ready'
  };
 }
-export default function handler(req,res){
+export default async function handler(req,res){
  res.setHeader('Cache-Control','no-store, max-age=0');
  res.setHeader('X-Content-Type-Options','nosniff');
  if(req.method!=='GET')return res.status(405).json({error:'Method not allowed'});
+ // No-key Google egress diagnostic; never sends tokens, prompts or personal information.
+ if(req.query?.diagnostic==='google-egress'){
+  const targets=[
+   ['gemini','https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite'],
+   ['google','https://www.googleapis.com/discovery/v1/apis?name=generativelanguage']
+  ];
+  const checks=await Promise.all(targets.map(async([name,url])=>{
+   const start=Date.now();
+   try{
+    const response=await fetch(url,{signal:AbortSignal.timeout(3500),headers:{Accept:'application/json'}});
+    await response.body?.cancel().catch(()=>{});
+    return {name,reachable:true,status:response.status,elapsedMs:Date.now()-start};
+   }catch(error){
+    return {name,reachable:false,errorType:error?.name||'Error',elapsedMs:Date.now()-start};
+   }
+  }));
+  return res.status(200).json({checks});
+ }
+
  const readiness=publicReadiness(process.env);
  return res.status(200).json({
   ...readiness,
