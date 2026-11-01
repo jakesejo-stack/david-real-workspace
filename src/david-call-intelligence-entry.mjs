@@ -19,7 +19,7 @@ async function callApi(action,query={},opts={}){
  return out;
 }
 function node(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
-function formatDate(iso){if(!iso)return '—';const d=new Date(iso);return Number.isNaN(d.getTime())?'—':d.toLocaleString('bg-BG',{dateStyle:'medium',timeStyle:'medium'});}
+function formatDate(iso){if(!iso)return '—';const d=new Date(iso);return Number.isNaN(d.getTime())?'—':d.toLocaleString('bg-BG',{timeZone:'Europe/Sofia',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});}
 function shortSid(s){return typeof s==='string'?s.slice(0,8)+'…'+s.slice(-4):'';}
 function field(name,value){const wrap=node('div','david-ci-field');wrap.append(node('small','',name),node('strong','',value||'Не е въведено'));return wrap;}
 function setMessage(parent,message){parent.replaceChildren(node('p','muted',message));}
@@ -49,9 +49,13 @@ function hideModal(){
  if(closeCallback){closeCallback.focus();closeCallback=null;}
 }
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&modal?.style.display==='flex')hideModal();});
-document.addEventListener('david:open-call',event=>{const sid=event.detail?.sid;if(typeof sid==='string'&&/^CA[0-9a-f]{32}$/i.test(sid))openCall(sid,event.detail?.trigger||null);});
+document.addEventListener('david:open-call',event=>{
+ const detail=event.detail||{},sid=detail.sid;
+ if(typeof sid==='string'&&/^CA[0-9a-f]{32}$/i.test(sid))
+  openCall(sid,detail.trigger||null,detail.overview||null,detail.autoLoadAudio===true);
+});
 function sectionTitle(text){return node('h3','david-ci-section-heading',text);}
-async function openCall(sid,trigger){
+async function openCall(sid,trigger,overview=null,autoLoadAudio=false){
  const shell=modalShell();closeCallback=trigger;
  const body=shell.querySelector('#david-call-modal-body');
  setMessage(body,'Зареждане на проверения разговор...');
@@ -62,9 +66,17 @@ async function openCall(sid,trigger){
   if(shell.style.display!=='flex')return;
   body.replaceChildren();
   const c=data.session?.company||{},s=data.session||{};
+  const actualCallMs=s.started_at&&s.ended_at?Math.max(0,Date.parse(s.ended_at)-Date.parse(s.started_at)):null;
+  shell.querySelector('.david-ci-dialog-header h2').textContent='Детайли · '+(c.company_name||c.contact_name||'Разговор');
   const summary=node('div','david-ci-grid');
   summary.append(field('Компания',c.company_name),field('Държава',c.country),field('Сектор',c.sector),
-   field('Начало',formatDate(s.started_at)),field('Край',formatDate(s.ended_at)),field('Статус',s.state));
+   field('Начало',formatDate(s.started_at)),field('Край',formatDate(s.ended_at)),
+   field('Реален разговор',Number.isFinite(actualCallMs)?formatAudioClock(actualCallMs):'—'),
+   field('Статус',s.state));
+  if(overview&&data.audio_access===true){
+   summary.append(field('Оператор',overview.worker_name),field('Gmail',overview.worker_email),
+    field('Набран номер',overview.dialed_number));
+  }
   body.append(summary);
   const company=node('section','david-ci-section');
   company.append(sectionTitle('Информация за компанията'));
@@ -74,7 +86,7 @@ async function openCall(sid,trigger){
   if(c.research_notes)company.append(node('p','david-ci-pre',c.research_notes));
   body.append(company);
   const sound=node('section','david-ci-section');
-  const actualCallMs=s.started_at&&s.ended_at?Math.max(0,Date.parse(s.ended_at)-Date.parse(s.started_at)):null;
+  let startAudioLoad=null;
   sound.append(sectionTitle('🎧 Аудиозапис на разговора'));
   if(Number.isFinite(actualCallMs))sound.append(node('p','david-ci-call-clock','⏱ Реален разговор: '+formatAudioClock(actualCallMs)));
   const browserRecording=data.browser_recording?.status==='completed'?data.browser_recording:null;
@@ -106,6 +118,7 @@ async function openCall(sid,trigger){
      }
      if(!resp.ok)throw Error('Не мога да заредя аудиото ('+resp.status+').');
      const blob=await resp.blob();
+     if(shell.style.display!=='flex'||!holder.isConnected)return;
      if(blob.size<1024||blob.size>26214400)throw Error('Невалиден или прекалено голям аудиофайл.');
      const prepared=await preparePlaybackBlob(blob);
      if(playerBlob)URL.revokeObjectURL(playerBlob);
@@ -139,8 +152,13 @@ async function openCall(sid,trigger){
     finally{playButton.disabled=false}
    });
    sound.append(info,playButton,holder);
+   startAudioLoad=()=>playButton.click();
   }
-  if(data.audio_access===true)body.append(sound);
+  if(data.audio_access===true){
+   body.append(sound);
+   // Load the protected audio into the popup after a row click, but never autoplay it.
+   if(autoLoadAudio&&startAudioLoad)startAudioLoad();
+  }
   const transcript=node('section','david-ci-section');transcript.append(sectionTitle('Пълен разговор и DAVID подсказки'));
   const suggestions=new Map((data.suggestions||[]).map(x=>[x.transcript_segment_id,x]));
   const segments=data.transcript||[];
@@ -164,29 +182,46 @@ function mountCallRecords(root){
  if(!heading)return;
  const host=heading.closest('.main');if(!host||host.querySelector('#david-call-records-extra'))return;
  const panel=node('section','card david-ci-list');panel.id='david-call-records-extra';
- const hdr=node('div','david-ci-list-header');hdr.append(node('h2','','DAVID · Детайлна история'));
+ const hdr=node('div','david-ci-list-header');hdr.append(node('h2','','DAVID · История на разговорите'));
  const refresh=node('button','btn subtle','↻ Обнови');refresh.type='button';hdr.append(refresh);panel.append(hdr);
- panel.append(node('p','muted','Реални разговори с фирма, време, транскрипция, аудио и подсказки от DAVID. Записът се показва само ако е разрешен.'));
- const list=node('div','david-ci-items');panel.append(list);
+ panel.append(node('p','muted','Разговорите са в една таблица. Натисни ред, за да отвориш детайлите. Аудиото е достъпно само за администратори.'));
+ const wrap=node('div','david-ci-table-wrap');wrap.setAttribute('role','region');
+ wrap.setAttribute('aria-label','Таблица с разговори');wrap.tabIndex=0;
+ const table=node('table','david-ci-table');const thead=node('thead'),headers=node('tr');
+ for(const label of ['Дата и час','Фирма / клиент','Продължителност','Статус','Детайли']){
+  const th=node('th','',label);th.scope='col';headers.append(th);
+ }
+ thead.append(headers);const tbody=node('tbody');table.append(thead,tbody);wrap.append(table);panel.append(wrap);
+ const empty=node('p','muted','Зареждане на реалните записи...');panel.append(empty);
  heading.insertAdjacentElement('afterend',panel);
  let fetching=false;
+ const openRecord=(s,button)=>openCall(s.call_sid,button,null,false);
  const load=async()=>{
-  if(fetching)return;fetching=true;refresh.disabled=true;setMessage(list,'Зареждане на реалните записи...');
+  if(fetching)return;fetching=true;refresh.disabled=true;
   try{
    const data=await callApi('call-records');
-   list.replaceChildren();
-   if(!data.calls?.length){setMessage(list,'Още няма реални разговори в DAVID Call Records.');return;}
-   for(const s of data.calls){
-    const row=node('div','david-ci-record');
-    const left=node('div','');left.append(node('strong','',s.company?.company_name||'Фирма не е свързана'),node('p','muted',formatDate(s.started_at)+' · '+s.state+' · '+shortSid(s.call_sid)));
-    const button=node('button','btn primary','Разгърни');button.type='button';button.addEventListener('click',()=>openCall(s.call_sid,button));
-    row.append(left,button);list.append(row);
+   tbody.replaceChildren();
+   const calls=Array.isArray(data.calls)?data.calls:[];
+   table.hidden=!calls.length;empty.hidden=!!calls.length;
+   if(!calls.length){empty.textContent='Още няма реални разговори в DAVID Call Records.';return;}
+   for(const s of calls){
+    const tr=node('tr','david-ci-table-row');
+    tr.append(node('td','',formatDate(s.started_at)));
+    const company=node('td','',s.company?.company_name||'Фирма не е свързана');
+    if(s.company?.contact_name)company.append(node('small','david-ci-table-secondary',s.company.contact_name));
+    tr.append(company);
+    const ms=s.started_at&&s.ended_at?Math.max(0,Date.parse(s.ended_at)-Date.parse(s.started_at)):null;
+    tr.append(node('td','',Number.isFinite(ms)?formatAudioClock(ms):'—'));
+    tr.append(node('td','',s.state||'—'));
+    const action=node('td','');const button=node('button','btn subtle','👁 Отвори');
+    button.type='button';button.addEventListener('click',event=>{event.stopPropagation();openRecord(s,button)});
+    action.append(button);tr.append(action);
+    tr.addEventListener('click',()=>openRecord(s,button));tbody.append(tr);
    }
-  }catch(error){setMessage(list,'Записите не могат да се заредят: '+error.message)}
+  }catch(error){tbody.replaceChildren();table.hidden=true;empty.hidden=false;empty.textContent='Записите не могат да се заредят: '+error.message}
   finally{fetching=false;refresh.disabled=false;}
  };
- refresh.addEventListener('click',load);
- load();
+ refresh.addEventListener('click',load);load();
 }
 function mountDesk(root){
  const heading=[...root.querySelectorAll('.main h1,.main h2')].find(h=>/^(Live Call Desk|Live Desk)$/.test(h.textContent?.trim()||''));
@@ -274,7 +309,13 @@ observer.observe(document.getElementById('root')||document.body,{childList:true,
 const css=document.createElement('style');
 css.textContent=`
 .david-ci-list-header,.david-ci-record{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.david-ci-items{display:grid;gap:10px;margin-top:14px}.david-ci-record{border:1px solid #dbe7f5;border-radius:12px;padding:14px}
+.david-ci-table-wrap{max-width:100%;overflow-x:auto;border:1px solid #dbe7f5;border-radius:12px;margin-top:14px}
+.david-ci-table{width:100%;min-width:650px;border-collapse:collapse;background:#fff;font-size:13px}
+.david-ci-table th,.david-ci-table td{text-align:left;padding:13px 14px;border-bottom:1px solid #e5edf7}
+.david-ci-table th{background:#eef5ff;font-weight:750;color:#173b60;white-space:nowrap}
+.david-ci-table-row{cursor:pointer}.david-ci-table-row:hover,.david-ci-table-row:focus-within{background:#f1f8ff}
+.david-ci-table tr:last-child td{border-bottom:0}
+.david-ci-table-secondary{display:block;color:#617b94;font-size:11px;margin-top:4px}
 .david-ci-record p{margin:4px 0 0}.david-ci-list-header h2{margin:0}.david-ci-live{margin:16px 0}
 .david-ci-consent-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
 .david-ci-consent-actions select{width:auto;flex:0 1 180px}
