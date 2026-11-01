@@ -559,6 +559,7 @@ export async function handleCallIntelligence(req,res,action){
      ...capabilities,
      transcription_authorized:!!data.transcription_consent_at,recording_authorized:!!data.recording_consent_at,
      transcription_active:!!data.transcription_sid&&!data.transcription_stopped_at,
+     transcription_started_at:data.transcription_consent_at||null,
      transcription_stopped:!!data.transcription_stopped_at,
      recording_active:!!data.recording_sid&&!data.recording_stopped_at,
      latest_customer_line:customer?.content||null,latest_operator_line:operator?.content||null,
