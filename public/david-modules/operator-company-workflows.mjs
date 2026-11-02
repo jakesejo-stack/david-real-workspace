@@ -1,3 +1,4 @@
+import {createTaskCallButton} from './task-call.mjs';
 // Call Desk source-level integration. Must be mounted in restored original Vite UI.
 export const OUTCOMES = Object.freeze({
  no_answer: 'Не отговориха',
@@ -201,7 +202,7 @@ export async function mountWorkerTasks(container,db,afterSave=()=>{}) {
   if(!tasks.length)container.append(el(d,'p','Все още няма възложени задачи.'));
   for(const task of tasks){
    const card=el(d,'section');
-   card.append(el(d,'h3',task.title+' — '+(task.company_name||'Обща задача')));
+   const taskHeading=el(d,'div');taskHeading.className='david-task-heading';taskHeading.append(el(d,'h3',task.title+' — '+(task.company_name||'Обща задача')),createTaskCallButton(d,task));card.append(taskHeading);
    card.append(el(d,'p',task.description||''));
    card.append(el(d,'p','Статус: '+task.status));
    if(task.company_id){

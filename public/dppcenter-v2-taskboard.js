@@ -1,3 +1,4 @@
+import {createTaskCallButton} from './david-modules/task-call.mjs';
 /* DppCenter integration for recovered ORIGINAL Vite app.
    No independent auth, credentials, or cross-origin tokens.
    Host supplies same-origin authenticated API adapter (see docs/DPP-CENTER-V2-HANDOFF.md).
@@ -73,13 +74,6 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
         status.value=item.status||'TODO';
         status.addEventListener('change',()=>makeAction(()=>api.updateStatus(item.id,status.value)));
         controls.append(status);
-        if(item.status!=='DONE'){
-          const callButton=create('button','dpp-center-task-call','☎ Към разговор');
-          callButton.type='button';
-          callButton.setAttribute('aria-label','Отвори Live Call Desk за задача '+(item.title||''));
-          callButton.addEventListener('click',openLiveDesk);
-          controls.append(callButton);
-        }
         const notes=create('div','dpp-center-notes');
         for(const note of Array.isArray(item.notes)?item.notes:[]){
           notes.append(create('p','',note.message||''));
@@ -93,7 +87,7 @@ export function mountDppTaskCenter(root,{api,role='worker',workers=[]}={}){
           if(!input.value.trim())return;
           makeAction(()=>api.addNote(item.id,input.value.trim()));
         });
-        details.append(controls,notes,noteForm);card.append(details);tasksBox.append(card);
+        details.append(controls,notes,noteForm);const heading=create('div','david-task-heading');heading.append(details,createTaskCallButton(document,item));card.append(heading);tasksBox.append(card);
       }
       if(!tasks.length)tasksBox.append(create('p','dpp-center-empty','Когато администратор ти възложи задача, тя ще се появи тук автоматично.'));
       hint.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG');
